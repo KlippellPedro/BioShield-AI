@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+
+# Ambiente / segredos (NUNCA versionar)
+.env
+*.local
+
+# Node / frontend
+node_modules/
+dist/
+.vite/
+
+# Modelos de IA (versionar via Git LFS / DVC)
+*.pt
+*.onnx
+
+# Evidencias / artefatos sensiveis (NUNCA versionar)
+*.enc
+evidences/
+dossiers/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Ferramentas locais (config de sessão do Claude Code)
+.claude/
