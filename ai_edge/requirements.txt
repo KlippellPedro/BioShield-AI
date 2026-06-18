@@ -1,0 +1,6 @@
+# Dependencias do modulo de visao (edge). Fixe versoes ao iniciar.
+ultralytics
+opencv-python
+numpy
+requests
+python-dotenv
