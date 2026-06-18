@@ -1,0 +1,12 @@
+# Dependencias do backend (Flask). Fixe versoes ao iniciar.
+flask
+flask-sqlalchemy
+flask-migrate
+flask-jwt-extended
+flask-socketio
+marshmallow
+psycopg2-binary
+pyotp
+reportlab
+python-dotenv
+gunicorn
