@@ -1,0 +1,1 @@
+# Reconhecimento facial (BIOMETRICO) da evidencia contra o cadastro do hospital para resolver nome/matricula (ADR-010). Dado pessoal SENSIVEL: cifrar template, minimizar, registrar em auditoria; resultado permanece contestavel (LGPD art. 20).
