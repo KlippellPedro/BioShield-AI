@@ -68,6 +68,9 @@ CREATE TYPE identification_status AS ENUM ('CONFIRMADA', 'CONTESTADA', 'REVOGADA
 -- CONSOLIDADO  = PDF regerado após o gestor confirmar a identidade no evento.
 CREATE TYPE dossier_status AS ENUM ('PENDENTE', 'CONSOLIDADO');
 
+-- Origem da identificação (ADR-010): humana (gestor) ou automatizada (IA / face match)
+CREATE TYPE identification_source AS ENUM ('HUMAN', 'AI');
+
 -- ---------------------------------------------------------------------
 -- FUNÇÕES UTILITÁRIAS
 -- ---------------------------------------------------------------------
@@ -253,14 +256,15 @@ CREATE TRIGGER set_default_retention
 -- ---------------------------------------------------------------------
 -- 7. IDENTIFICATIONS (identificação nominal humana — RF-17)
 -- ---------------------------------------------------------------------
--- A IA é anônima por padrão; a identidade só é atribuída por um HUMANO,
--- de forma contestável. subject_reference é DADO PESSOAL: cifrar em repouso
+-- A identidade é atribuída por um HUMANO (gestor) OU pela IA (face match, ADR-010),
+-- sempre de forma contestável. subject_reference é DADO PESSOAL: cifrar em repouso
 -- e seguir a MESMA retenção da evidência (ON DELETE CASCADE).
 CREATE TABLE identifications (
     identification_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     evidence_id       UUID NOT NULL REFERENCES visual_evidence(evidence_id) ON DELETE CASCADE,
-    identified_by     UUID NOT NULL REFERENCES users(user_id) ON DELETE RESTRICT,
-    subject_reference TEXT NOT NULL,                 -- identidade atribuída pelo humano (cifrar)
+    source            identification_source NOT NULL DEFAULT 'HUMAN', -- HUMAN (gestor) ou AI (face match, ADR-010)
+    identified_by     UUID REFERENCES users(user_id) ON DELETE RESTRICT, -- obrigatório se HUMAN; NULL se AI
+    subject_reference TEXT NOT NULL,                 -- identidade atribuída (nome/matrícula); DADO PESSOAL — cifrar
     justification     TEXT,
     status            identification_status NOT NULL DEFAULT 'CONFIRMADA',
     identified_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -268,13 +272,19 @@ CREATE TABLE identifications (
     created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT chk_contest_coerente CHECK (
         status <> 'CONTESTADA' OR contested_at IS NOT NULL
+    ),
+    -- Coerência origem <-> autor: HUMAN exige identified_by; AI exige identified_by NULL.
+    CONSTRAINT chk_identification_source CHECK (
+        (source = 'HUMAN' AND identified_by IS NOT NULL) OR
+        (source = 'AI'    AND identified_by IS NULL)
     )
 );
 
 COMMENT ON TABLE identifications IS
-  'Registro da identificação NOMINAL HUMANA do profissional infrator, atribuída pela GERÊNCIA autorizada após a auditoria visual da evidência (RF-17). Captura quem identificou (identified_by), quando (identified_at), exige confirmação explícita (status) e é contestável pelo titular (CONTESTADA/REVOGADA, LGPD art. 20). subject_reference é dado pessoal: cifrar em repouso e restringir. Vínculo à evidência com ON DELETE CASCADE → a identidade é expurgada junto com o snapshot.';
-COMMENT ON COLUMN identifications.subject_reference IS 'Identidade atribuída pelo humano (nome ou matrícula). DADO PESSOAL — cifrar em repouso (RNF-12) e restringir acesso.';
-COMMENT ON COLUMN identifications.identified_by IS 'Gestor responsável pela identificação (RF-17); preserva a rastreabilidade e a responsabilização do ato humano.';
+  'Registro da identificação NOMINAL do profissional infrator sobre a evidência (RF-17). Origem HUMAN (gestor, após auditoria visual) ou AI (face match automático, ADR-010); em ambos permanece CONTESTÁVEL e revisável (status CONTESTADA/REVOGADA, LGPD art. 20). subject_reference é dado pessoal: cifrar em repouso. ON DELETE CASCADE → expurgada junto com o snapshot.';
+COMMENT ON COLUMN identifications.source IS 'Origem da identificação: HUMAN (gestor) ou AI (face match, ADR-010). Rege a obrigatoriedade de identified_by (chk_identification_source).';
+COMMENT ON COLUMN identifications.subject_reference IS 'Identidade atribuída (nome ou matrícula). DADO PESSOAL — cifrar em repouso (RNF-12) e restringir acesso.';
+COMMENT ON COLUMN identifications.identified_by IS 'Gestor responsável quando source=HUMAN (RF-17); NULL quando source=AI. ON DELETE RESTRICT.';
 
 -- ---------------------------------------------------------------------
 -- 8. INCIDENT_DOSSIERS (Dossiê Automatizado de Incidente — relatório PDF)
@@ -500,16 +510,17 @@ Referência ao **snapshot nítido (sem desfoque) e cifrado** do instante da infr
 > A relação evidência→eventos é **1:N**: o lado da chave migrou para `events.evidence_id`.
 > Vários eventos (um por EPI violado no mesmo instante) compartilham um único snapshot (RF-16).
 
-### 3.7 `identifications` — Identificação Nominal Humana (RF-17)
-**Registro audit-grade e contestável de quem cometeu a infração.** Após auditar a evidência nítida, o gestor atribui a identidade ao instante de infração: este registro traz **quem** identificou e **quando**, exige confirmação explícita, é **contestável** pelo titular (LGPD art. 20) e é **expurgado junto com a evidência** (`ON DELETE CASCADE`). Como a evidência é 1:N com os eventos, uma identificação por instante cobre todos os eventos daquele instante.
+### 3.7 `identifications` — Identificação Nominal (humana ou IA) (RF-17 / ADR-010)
+**Registro contestável de quem cometeu a infração.** A identidade é atribuída ao instante de infração por um **humano** (gestor, após auditar a evidência) **ou pela IA** (face match automático, ADR-010). Em ambos os casos o registro traz **a origem**, **quando**, é **contestável/revisável** pelo titular (LGPD art. 20) e é **expurgado junto com a evidência** (`ON DELETE CASCADE`). Como a evidência é 1:N com os eventos, uma identificação por instante cobre todos os eventos daquele instante.
 
-> **Relação com `events.audited_professional_*` (§3.5):** `identifications` é a **fonte da verdade** para contestação e rastreabilidade; os campos em `events` são a **cópia operacional** que alimenta a consolidação do dossiê (§3.8). Mantenha os dois coerentes no mesmo fluxo de acknowledge e sob o mesmo expurgo.
+> **Relação com `events.audited_professional_*` (§3.5):** `identifications` é a **fonte da verdade** para contestação e rastreabilidade; os campos em `events` são a **cópia operacional** que alimenta a consolidação do dossiê (§3.8). Mantenha os dois coerentes no mesmo fluxo e sob o mesmo expurgo.
 
 | Coluna | Tipo | Chave | Nulo | Descrição |
 |---|---|---|---|---|
 | `identification_id` | UUID | PK | Não | Identificador da identificação. |
 | `evidence_id` | UUID | FK→visual_evidence | Não | Evidência identificada; `ON DELETE CASCADE` (segue a retenção da evidência). |
-| `identified_by` | UUID | FK→users | Não | Gestor que atribuiu a identidade (humano); `ON DELETE RESTRICT`. Garante rastreabilidade e responsabilização do ato. |
+| `source` | identification_source | — | Não | Origem: `HUMAN` (gestor) ou `AI` (face match, ADR-010). Rege a obrigatoriedade de `identified_by`. |
+| `identified_by` | UUID | FK→users | **Sim** | Gestor responsável quando `source=HUMAN`; **NULL** quando `source=AI`. `ON DELETE RESTRICT` (`chk_identification_source`). |
 | `subject_reference` | TEXT | — | Não | **Dado pessoal** — identidade atribuída pela gerência (**nome ou matrícula** do profissional infrator). Cifrar em repouso (RNF-12) e restringir acesso. |
 | `justification` | TEXT | — | Sim | Justificativa da identificação. |
 | `status` | identification_status | — | Não | `CONFIRMADA` (confirmação explícita) / `CONTESTADA` / `REVOGADA`. |
@@ -525,7 +536,7 @@ Relação **1:1** com `events` (cada infração tem no máximo um dossiê). Cicl
 | `dossier_id` | UUID | PK | Não | Identificador do dossiê. |
 | `event_id` | UUID | FK→events, UQ | Não | Evento (violação) documentado; **1:1** (`UNIQUE`), `ON DELETE RESTRICT` (não se apaga evento com dossiê). |
 | `pdf_file_reference` | TEXT | — | Não | Caminho seguro/URI do PDF **cifrado** em repouso (RNF-12); nunca o binário. |
-| `status` | dossier_status | — | Não | `PENDENTE` (sem identificação) / `CONSOLIDADO` (após identificação humana — trigger exige `audited_professional_name` e `_registration` preenchidos no evento). |
+| `status` | dossier_status | — | Não | `PENDENTE` (sem identificação) / `CONSOLIDADO` (após a identificação — humana ou IA; trigger exige `audited_professional_name` e `_registration` preenchidos no evento). |
 | `created_at` | TIMESTAMPTZ | — | Não | Geração do dossiê. |
 | `updated_at` | TIMESTAMPTZ | — | Não | Última alteração/regeração do arquivo (via trigger). |
 
