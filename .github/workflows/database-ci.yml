@@ -1,0 +1,91 @@
+# Valida que o banco continua construível e que as proteções de negócio seguem
+# de pé. É a CI mais importante do projeto hoje: o banco é a única frente
+# implementada, e é nele que moram as garantias de LGPD e RNF-19.
+#
+# O seed.sql funciona como teste de aceitação — ele tenta cinco operações que
+# DEVEM ser rejeitadas e imprime "FALHA DO TESTE" se alguma delas passar. Este
+# workflow quebra o build nesse caso.
+name: database-ci
+
+on:
+  push:
+    paths:
+      - 'database/**'
+      - 'migrations/**'
+      - 'scripts/apply_schema.sh'
+      - '.github/workflows/database-ci.yml'
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  schema:
+    name: Schema, migrações e regras de negócio
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: bioshield
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      PGHOST: localhost
+      PGPORT: '5432'
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PGDATABASE: bioshield
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar cliente do PostgreSQL
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Aplicar baseline, migrações e seed
+        run: |
+          bash scripts/apply_schema.sh --with-seed 2>&1 | tee seed_output.txt
+
+      - name: Exigir que as proteções tenham barrado o que deviam
+        run: |
+          if grep -q "FALHA DO TESTE" seed_output.txt; then
+            echo "::error::Uma proteção de negócio deixou passar uma operação que deveria ser rejeitada."
+            grep "FALHA DO TESTE" seed_output.txt
+            exit 1
+          fi
+          # As cinco guardas precisam ter se manifestado; ausência de saída também é falha.
+          esperados=$(grep -c "OK (esperado)" seed_output.txt || true)
+          if [ "$esperados" -lt 5 ]; then
+            echo "::error::Esperava 5 bloqueios confirmados, encontrei $esperados. Alguma guarda sumiu do schema?"
+            exit 1
+          fi
+          echo "As 5 proteções responderam como esperado."
+
+      # O baseline é create-once (CREATE TYPE/TABLE sem guarda) e não é reaplicável
+      # de propósito. As migrações, sim: são o caminho de upgrade de um banco que
+      # já está em produção, e precisam rodar duas vezes sem quebrar.
+      - name: Migrações precisam ser idempotentes
+        run: |
+          bash scripts/apply_schema.sh --migrations-only
+          bash scripts/apply_schema.sh --migrations-only
+          echo "Migrações reaplicadas sem erro sobre banco já populado."
+
+      - name: Seed precisa ser reexecutável sem duplicar dado
+        run: |
+          bash scripts/apply_schema.sh --migrations-only > /dev/null
+          psql -v ON_ERROR_STOP=1 -f database/seed.sql > /dev/null
+          total=$(psql -tAc "SET search_path TO vigilis; SELECT count(*) FROM identifications;")
+          if [ "$total" != "2" ]; then
+            echo "::error::Após reexecutar o seed, identifications tem $total linhas (esperado 2). O seed deixou de ser idempotente."
+            exit 1
+          fi
+          echo "Seed reexecutado sem duplicação."

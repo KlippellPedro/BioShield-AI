@@ -1,1 +1,53 @@
-# Lint + testes do backend (pytest)
+# Lint e testes do backend.
+#
+# Enquanto o backend for esqueleto, os arquivos de tests/ são comentários de uma
+# linha e o pytest não coleta nada (exit 5). O workflow tolera esse caso e avisa,
+# em vez de fingir que passou — mas qualquer teste que exista e falhe quebra o
+# build normalmente.
+name: backend-ci
+
+on:
+  push:
+    paths:
+      - 'backend/**'
+      - '.github/workflows/backend-ci.yml'
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Lint e pytest
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Instalar dependências
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest ruff
+
+      - name: Lint (ruff)
+        run: ruff check .
+
+      - name: Testes (pytest)
+        run: |
+          set +e
+          pytest -q
+          codigo=$?
+          set -e
+          if [ $codigo -eq 5 ]; then
+            echo "::warning::Nenhum teste coletado — o backend ainda é esqueleto. Isso deixa de ser aceitável assim que houver rota implementada."
+            exit 0
+          fi
+          exit $codigo

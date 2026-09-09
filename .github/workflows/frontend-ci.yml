@@ -1,1 +1,52 @@
-# Lint + build do frontend
+# Lint e build do frontend.
+#
+# O package.json ainda não declara dependências, então não há o que instalar nem
+# construir. O workflow detecta esse estado e avisa, em vez de quebrar por algo
+# que é esperado nesta fase — mas assim que houver dependências, o build passa a
+# ser exigido de verdade.
+name: frontend-ci
+
+on:
+  push:
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/frontend-ci.yml'
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Instalar e construir
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Verificar se já há dependências declaradas
+        id: estado
+        run: |
+          tem_deps=$(node -p "const p=require('./package.json'); Object.keys({...p.dependencies, ...p.devDependencies}).length")
+          echo "tem_deps=$tem_deps" >> "$GITHUB_OUTPUT"
+          if [ "$tem_deps" = "0" ]; then
+            echo "::warning::package.json sem dependências — o frontend ainda é esqueleto. Build e lint ficam pendentes até o React/Vite entrarem."
+          fi
+
+      - name: Instalar dependências
+        if: steps.estado.outputs.tem_deps != '0'
+        run: |
+          if [ -f package-lock.json ]; then npm ci; else npm install; fi
+
+      - name: Verificação de tipos
+        if: steps.estado.outputs.tem_deps != '0'
+        run: npx tsc --noEmit
+
+      - name: Build
+        if: steps.estado.outputs.tem_deps != '0'
+        run: npm run build

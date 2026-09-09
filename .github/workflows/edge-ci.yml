@@ -1,0 +1,53 @@
+# Lint e testes do ai_edge.
+#
+# O edge não tinha cobertura nenhuma de CI, apesar de conter a regra mais
+# delicada do sistema: a máquina de estados do T_remocao, que decide se houve
+# remoção real de EPI ou apenas oclusão. Um falso Tipo B nascido aqui atravessa
+# todo o pipeline e vira dossiê nominal — nenhum estágio posterior corrige isso.
+name: edge-ci
+
+on:
+  push:
+    paths:
+      - 'ai_edge/**'
+      - '.github/workflows/edge-ci.yml'
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Lint e pytest
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ai_edge
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # As dependências do edge são pesadas (ultralytics, opencv) e puxam torch.
+      # Para lint e testes de regra temporal elas não são necessárias: os testes
+      # da máquina de estados devem rodar com dublês, sem modelo e sem câmera.
+      - name: Instalar ferramentas de teste
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest ruff
+
+      - name: Lint (ruff)
+        run: ruff check .
+
+      - name: Testes (pytest)
+        run: |
+          set +e
+          pytest -q
+          codigo=$?
+          set -e
+          if [ $codigo -eq 5 ]; then
+            echo "::warning::Nenhum teste coletado — a máquina de estados do T_remocao ainda não tem testes. É a maior lacuna de qualidade do projeto."
+            exit 0
+          fi
+          exit $codigo
