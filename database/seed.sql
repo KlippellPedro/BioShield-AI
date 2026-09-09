@@ -4,11 +4,14 @@
 -- Pré-requisito: rodar antes o schema.sql (estrutura + seed de papéis).
 -- Objetivo: exercitar as regras de negócio e provar as restrições:
 --   • Fluxo 1:N — vários eventos do mesmo instante compartilham 1 evidência.
---   • Fluxo do Dossiê — PENDENTE -> (identificação humana) -> CONSOLIDADO.
+--   • Fluxo do Dossiê — PENDENTE -> (identificação) -> CONSOLIDADO.
 --   • Identificação audit-grade e contestável em identifications.
+--   • Identificação de origem AI (face match, ADR-010) sem autor humano.
 --   • BLOQUEIO 1: consolidar dossiê sem identificação no evento.
 --   • BLOQUEIO 2: dar papel com acesso à evidência a usuário sem MFA.
 --   • BLOQUEIO 3: retenção de evidência acima do teto de 180 dias.
+--   • BLOQUEIO 4: promover papel a can_view_evidence com membro sem MFA.
+--   • BLOQUEIO 5: identificação AI com autor humano preenchido (incoerente).
 --   • Default de retenção (90 dias) preenchido por trigger.
 --
 -- Idempotente: a seção 0 limpa os dados TRANSACIONAIS desta demo (dossiês,
@@ -54,6 +57,13 @@ ON CONFLICT DO NOTHING;
 -- Gestora recebe ENFERMAGEM_CHEFE (can_view_evidence = TRUE) -> passa, pois tem MFA.
 INSERT INTO user_roles (user_id, role_id)
 SELECT 'a0000000-0000-0000-0000-000000000001', role_id FROM roles WHERE code = 'ENFERMAGEM_CHEFE'
+ON CONFLICT DO NOTHING;
+
+-- Operador sem MFA recebe GESTOR_CCIH (can_view_evidence = FALSE) -> passa, pois
+-- o papel não dá acesso à evidência. Prepara o BLOQUEIO 4: com ele dentro, o papel
+-- não pode mais ser promovido a can_view_evidence.
+INSERT INTO user_roles (user_id, role_id)
+SELECT 'a0000000-0000-0000-0000-000000000002', role_id FROM roles WHERE code = 'GESTOR_CCIH'
 ON CONFLICT DO NOTHING;
 
 -- ---------------------------------------------------------------------
@@ -139,7 +149,7 @@ BEGIN
     SELECT status INTO v_status FROM incident_dossiers
      WHERE dossier_id = 'e0000000-0000-0000-0000-000000000001';
     IF v_status = 'CONSOLIDADO' THEN
-        RAISE NOTICE 'OK — dossiê consolidado após identificação humana.';
+        RAISE NOTICE 'OK — dossiê consolidado após a identificação do evento.';
     ELSE
         RAISE WARNING 'FALHA DO TESTE: dossiê não consolidou (status=%).', v_status;
     END IF;
@@ -205,6 +215,50 @@ BEGIN
     END;
 END $$;
 
+-- ---------------------------------------------------------------------
+-- BLOQUEIO 4 — promover papel a can_view_evidence tendo membro sem MFA (RNF-19).
+-- Terceiro flanco: sem este trigger, um único UPDATE em `roles` daria acesso
+-- à evidência ao Bruno (sem MFA) sem passar por nenhuma outra guarda.
+-- ---------------------------------------------------------------------
+DO $$
+BEGIN
+    BEGIN
+        UPDATE roles SET can_view_evidence = TRUE WHERE code = 'GESTOR_CCIH';
+        RAISE WARNING 'FALHA DO TESTE: papel promovido a acesso de evidência com membro SEM MFA.';
+    EXCEPTION WHEN others THEN
+        RAISE NOTICE 'OK (esperado) — promoção do papel bloqueada por membro sem MFA: %', SQLERRM;
+    END;
+END $$;
+
+-- ---------------------------------------------------------------------
+-- BLOQUEIO 5 — identificação de origem AI não pode ter autor humano (ADR-010).
+-- A constraint chk_identification_source amarra source <-> identified_by.
+-- ---------------------------------------------------------------------
+DO $$
+BEGIN
+    BEGIN
+        INSERT INTO identifications
+            (evidence_id, source, identified_by, subject_reference, justification, status)
+        VALUES ('c0000000-0000-0000-0000-000000000002', 'AI',
+                'a0000000-0000-0000-0000-000000000001',
+                'Identidade incoerente', 'Origem AI com autor humano.', 'CONFIRMADA');
+        RAISE WARNING 'FALHA DO TESTE: aceitou identificação AI com autor humano.';
+    EXCEPTION WHEN others THEN
+        RAISE NOTICE 'OK (esperado) — identificação AI com autor humano rejeitada: %', SQLERRM;
+    END;
+END $$;
+
+-- ---------------------------------------------------------------------
+-- CAMINHO FELIZ DA IA — identificação automatizada, sem autor humano (ADR-010).
+-- É como o face_match_service deve gravar: source = 'AI', identified_by = NULL.
+-- Permanece CONTESTÁVEL, que é a salvaguarda do art. 20 da LGPD.
+-- ---------------------------------------------------------------------
+INSERT INTO identifications
+    (evidence_id, source, identified_by, subject_reference, justification, status)
+VALUES ('c0000000-0000-0000-0000-000000000002', 'AI', NULL,
+        'Dra. Marina Alves / CRM-RS 654321',
+        'Face match automático contra o cadastro do hospital (confiança 0.94).', 'CONFIRMADA');
+
 -- =====================================================================
 -- VERIFICAÇÃO FINAL (saída para conferência visual)
 -- =====================================================================
@@ -230,7 +284,14 @@ SELECT 'evidencia_1N' AS check, evidence_id, count(*) AS qtd_eventos,
  WHERE evidence_id = 'c0000000-0000-0000-0000-000000000002'
  GROUP BY evidence_id;
 
--- Registro audit-grade da identificação (contestável).
-SELECT 'identificacao' AS check, identified_by, subject_reference, status, identified_at
+-- Registro audit-grade da identificação (contestável), nas duas origens possíveis.
+-- HUMAN traz autor preenchido; AI traz autor NULL. Ambas continuam contestáveis.
+SELECT 'identificacao' AS check, source, identified_by, subject_reference, status, identified_at
   FROM identifications
- WHERE evidence_id = 'c0000000-0000-0000-0000-000000000001';
+ WHERE evidence_id IN ('c0000000-0000-0000-0000-000000000001',
+                       'c0000000-0000-0000-0000-000000000002')
+ ORDER BY source;
+
+-- Papel de teste continua SEM acesso à evidência (o BLOQUEIO 4 deve ter barrado).
+SELECT 'papel_nao_promovido' AS check, code, can_view_evidence
+  FROM roles WHERE code = 'GESTOR_CCIH';

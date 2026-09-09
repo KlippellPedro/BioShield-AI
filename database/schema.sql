@@ -8,11 +8,16 @@
 | **Schema** | `vigilis` |
 | **Codificação** | UTF-8 |
 | **Convenções** | `snake_case`, chaves substitutas UUID (exceto `audit_logs`, ver §3) |
-| **Versão SRS** | v1.3 (evidência 1:N, MFA, retenção limitada, identificação humana) |
+| **Versão SRS** | v1.4 (evidência 1:N, MFA, retenção limitada, **identificação automatizada** por face match — ADR-010) |
 | **Rastreabilidade SRS** | RF-04/05/13/14/16/17, RNF-05/12/13/14/18/19, §6 (LGPD) |
+| **Migrações incorporadas** | `2026-06-18_identification-source.sql` · `2026-06-18_fix-mfa-bypass.sql` · `2026-09-09_fix-role-privilege-escalation.sql` |
 
-> Este documento reflete o estado **pós-migração v1.3**. Para um banco já existente, aplique
-> `migrations/2026-06-17_srs-v1.3_evidence-identification.sql` (não recrie o banco).
+> **Este arquivo é o estado ATUAL do banco, não um marco histórico.** Ele já incorpora todas as
+> migrações listadas acima — um banco criado a partir daqui nasce completo, e reaplicar as
+> migrações sobre ele é inofensivo (todas são idempotentes), porém desnecessário.
+>
+> Para um banco **já existente**, não recrie: aplique apenas as migrações que faltam, em ordem
+> cronológica, conforme [`migrations/README.md`](../migrations/README.md).
 
 ---
 
@@ -22,6 +27,8 @@
 - **Imutabilidade do `audit_logs`:** garantida por *triggers* que bloqueiam `UPDATE`/`DELETE` **e** por `REVOKE` de privilégios (defesa em profundidade).
 - **Sobrevivência da auditoria ao expurgo:** os alvos da auditoria são referências lógicas (sem FK), para que o expurgo de evidência (retenção LGPD) **não** apague o registro de quem a acessou.
 - **Latência ≤ 3 s:** sustentada por índices voltados às consultas do console em tempo real (eventos pendentes por zona/janela temporal) e à trilha de auditoria.
+- **MFA e acesso à evidência (RNF-19):** o banco garante a invariante *"todo usuário vinculado a papel com `can_view_evidence` tem MFA habilitado"* por **três** triggers, um para cada caminho de mudança — o vínculo (`require_mfa_evidence_role`), o usuário (`prevent_mfa_disable_with_evidence_role`) e o papel (`prevent_evidence_grant_without_mfa`). Fechar só um ou dois deles deixa a regra contornável, porque o atacante escolhe por onde entrar. A validação principal continua no login, na aplicação; isto é a rede de segurança.
+- **Origem da identificação (ADR-010):** `identifications.source` distingue `HUMAN` de `AI`, e `chk_identification_source` amarra a coerência com `identified_by`. A automação preenche o dossiê, mas o registro continua contestável (`status`) — é o que sustenta o direito de revisão do art. 20 da LGPD no nível do dado.
 
 ---
 
@@ -148,6 +155,69 @@ $$ LANGUAGE plpgsql;
 CREATE TRIGGER require_mfa_evidence_role
     BEFORE INSERT OR UPDATE ON user_roles
     FOR EACH ROW EXECUTE FUNCTION trg_require_mfa_for_evidence_role();
+
+-- Defesa em profundidade (RNF-19), 2º flanco: impedir DESLIGAR o MFA de quem
+-- já possui papel com acesso à evidência (migração 2026-06-18_fix-mfa-bypass).
+CREATE OR REPLACE FUNCTION trg_prevent_mfa_disable_with_evidence_role()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+          FROM user_roles ur
+          JOIN roles r ON r.role_id = ur.role_id
+         WHERE ur.user_id = NEW.user_id
+           AND r.can_view_evidence = TRUE
+    ) THEN
+        RAISE EXCEPTION
+          'Não é possível desabilitar o MFA do usuário %: ele ainda possui papel com acesso à evidência (RNF-19). Revogue o papel antes de desativar o MFA.',
+          NEW.user_id
+          USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER prevent_mfa_disable_with_evidence_role
+    BEFORE UPDATE ON users
+    FOR EACH ROW
+    WHEN (OLD.mfa_enabled = TRUE AND NEW.mfa_enabled = FALSE)
+    EXECUTE FUNCTION trg_prevent_mfa_disable_with_evidence_role();
+
+-- Defesa em profundidade (RNF-19), 3º flanco: impedir PROMOVER um papel a
+-- can_view_evidence enquanto ele tiver membros sem MFA — do contrário um único
+-- UPDATE em `roles` concederia acesso à evidência a N usuários de uma vez,
+-- sem passar por nenhuma das duas guardas acima
+-- (migração 2026-09-09_fix-role-privilege-escalation).
+CREATE OR REPLACE FUNCTION trg_prevent_evidence_grant_without_mfa()
+RETURNS TRIGGER AS $$
+DECLARE
+    v_sem_mfa INTEGER;
+BEGIN
+    SELECT count(*) INTO v_sem_mfa
+      FROM user_roles ur
+      JOIN users u ON u.user_id = ur.user_id
+     WHERE ur.role_id = NEW.role_id
+       AND u.mfa_enabled = FALSE;
+
+    IF v_sem_mfa > 0 THEN
+        RAISE EXCEPTION
+          'Não é possível conceder acesso à evidência ao papel "%": ele possui % membro(s) sem MFA habilitado (RNF-19). Habilite o MFA desses usuários ou revogue o vínculo antes de promover o papel.',
+          NEW.code, v_sem_mfa
+          USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER prevent_evidence_grant_without_mfa
+    BEFORE UPDATE ON roles
+    FOR EACH ROW
+    WHEN (OLD.can_view_evidence = FALSE AND NEW.can_view_evidence = TRUE)
+    EXECUTE FUNCTION trg_prevent_evidence_grant_without_mfa();
+
+-- Invariante garantida pelos três triggers acima, venha a mudança pelo usuário,
+-- pelo vínculo ou pelo papel:
+--   "todo usuário vinculado a papel com can_view_evidence = TRUE tem mfa_enabled = TRUE"
 
 -- ---------------------------------------------------------------------
 -- 4. ZONES (áreas de risco)
@@ -313,7 +383,8 @@ CREATE TRIGGER set_updated_at_dossiers
     FOR EACH ROW EXECUTE FUNCTION trg_set_updated_at();
 
 -- Integridade de consolidação: um dossiê só vira CONSOLIDADO se o evento já tiver
--- a identificação humana preenchida (nome E matrícula). Regra entre tabelas, por
+-- a identificação preenchida (nome E matrícula), venha ela do gestor ou do face
+-- match automático (ADR-010) — o guard é indiferente à origem. Regra entre tabelas, por
 -- isso uma trigger (CHECK não enxerga outra tabela).
 CREATE OR REPLACE FUNCTION trg_dossier_consolidation_guard()
 RETURNS TRIGGER AS $$
@@ -330,7 +401,7 @@ BEGIN
         IF v_name IS NULL OR btrim(v_name) = ''
            OR v_reg IS NULL OR btrim(v_reg) = '' THEN
             RAISE EXCEPTION
-              'Dossiê % só pode ser CONSOLIDADO após a identificação humana do evento % (audited_professional_name e audited_professional_registration preenchidos).',
+              'Dossiê % só pode ser CONSOLIDADO após a identificação do evento % (audited_professional_name e audited_professional_registration preenchidos, por gestor ou por face match).',
               NEW.dossier_id, NEW.event_id;
         END IF;
     END IF;
@@ -434,7 +505,7 @@ INSERT INTO roles (code, name, description, can_view_evidence) VALUES
 | `code` | VARCHAR(40) | UQ | Não | Código técnico único (ex.: `OPERADOR`). |
 | `name` | VARCHAR(120) | — | Não | Nome legível do papel. |
 | `description` | TEXT | — | Sim | Descrição da responsabilidade. |
-| `can_view_evidence` | BOOLEAN | — | Não | Autoriza visualização da evidência visual (RF-14). |
+| `can_view_evidence` | BOOLEAN | — | Não | Autoriza visualização da evidência visual (RF-14). Só pode ser promovido de `FALSE` para `TRUE` se todos os membros do papel tiverem MFA (RNF-19, trigger `prevent_evidence_grant_without_mfa`). |
 | `created_at` | TIMESTAMPTZ | — | Não | Data de criação. |
 
 ### 3.2 `users` — Usuários
