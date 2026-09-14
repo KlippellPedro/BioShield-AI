@@ -8,8 +8,8 @@ Camada de dados do BioShield AI: **PostgreSQL 14+**, schema técnico `vigilis`. 
 
 | Arquivo | Papel |
 |---|---|
-| `schema.sql` | DDL canônico e dicionário de dados completo: 8 tabelas, tipos ENUM (listas de valores fixos), gatilhos de retenção, de MFA e de imutabilidade da auditoria. |
-| `seed.sql` | Carga de demonstração que exercita as regras de negócio — o fluxo 1:N de evidência, o ciclo do dossiê e três bloqueios que devem falhar (consolidar dossiê sem identificação, dar acesso à evidência sem MFA, retenção acima de 180 dias). |
+| `schema.sql` | DDL canônico e dicionário de dados completo: 9 tabelas, tipos ENUM (listas de valores fixos), gatilhos de retenção, de MFA e de imutabilidade da auditoria. |
+| `seed.sql` | Carga de demonstração que exercita as regras de negócio — o fluxo 1:N de evidência, o ciclo do dossiê, a identificação feita pela IA e cinco bloqueios que devem falhar (consolidar dossiê sem identificação, dar acesso à evidência sem MFA, retenção acima de 180 dias, promover papel com membro sem MFA, identificação de IA com autor humano). |
 | `migrations/` | Esqueleto do Alembic — a ferramenta que gera e aplica migrações a partir dos modelos Python (`env.py`, `script.py.mako`, `versions/0001_baseline.py`). Ainda em branco. |
 | `README.md` | Este arquivo. |
 
