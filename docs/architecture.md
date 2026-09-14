@@ -49,6 +49,7 @@ Base normativa: o **SRS** (*Software Requirements Specification*, a Especificaç
 
 - **Contexto:** acessos, visualizações de evidência e **matches faciais** precisam de prova durável (RNF-14).
 - **Decisão:** `audit_logs` é append-only — `UPDATE`/`DELETE` bloqueados por trigger **e** por `REVOKE` (defesa em profundidade). Alvos são referências **lógicas** (sem FK), para sobreviver ao expurgo da evidência.
+- **Estado da implementação (2026-09-14):** a camada de triggers cobre `UPDATE`, `DELETE` e `TRUNCATE`. Os dois primeiros são triggers de linha; o `TRUNCATE` exigiu um trigger de instrução (`block_audit_truncate`, migração `2026-09-14_fix-audit-truncate.sql`), porque triggers de linha não disparam com ele — até essa correção, a trilha podia ser esvaziada, o que foi confirmado em teste. A camada de `REVOKE` segue escrita no `schema.sql` mas comentada, porque depende do papel de banco da aplicação, ainda inexistente. Um superusuário do PostgreSQL continua podendo desabilitar triggers; isso é limite do SGBD e responsabilidade da gestão de acesso ao servidor.
 - **Consequência:** um usuário com registros na trilha é, na prática, **indeletável** (a FK `ON DELETE SET NULL` colide com a imutabilidade) — o caminho correto é desativar (`is_active`/`USER_DEACTIVATE`), nunca `DELETE`.
 
 ## ADR-007 — Dossiê de incidente com ciclo PENDENTE → CONSOLIDADO

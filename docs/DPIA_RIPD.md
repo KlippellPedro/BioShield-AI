@@ -112,7 +112,7 @@ O legítimo interesse **não** está disponível para dado sensível. Definir a 
 | R2 | Acesso indevido à evidência identificável | Alto | RBAC e MFA obrigatório, com três triggers no banco fechando os caminhos de burla; cada visualização gera `EVIDENCE_VIEW` na trilha | **Implementado e testado** |
 | R3 | Retenção indefinida de imagem e biometria | Alto | `retention_until` com default de 90 dias e teto rígido de 180 (`chk_retention_max`); job de expurgo | Banco pronto; **job é esqueleto** |
 | R4 | Vazamento de template facial | Muito alto — biometria não se troca como senha | Cifra em repouso por referência ao KMS; o segredo nunca fica no banco nem no repositório | **Política definida, implementação pendente** |
-| R5 | Adulteração da trilha para encobrir acesso | Alto | `audit_logs` append-only, com `UPDATE`/`DELETE` bloqueados por trigger e por `REVOKE` | **Implementado** |
+| R5 | Adulteração da trilha para encobrir acesso | Alto | `UPDATE`, `DELETE` e `TRUNCATE` bloqueados por trigger; revogação de privilégios prevista | **Implementado e testado** — resta o limite do superusuário do banco |
 | R6 | Desvio de finalidade (uso para controle de produtividade) | Alto | Nenhuma medida técnica; depende de governança e contrato | **Descoberto** |
 | R7 | Captura de terceiros (pacientes, visitantes, acompanhantes) no snapshot | Alto — inclui dado de saúde de quem nem é destinatário do sistema | Nenhuma medida específica hoje | **Descoberto** |
 | R8 | Falso negativo — infração não detectada gera falsa sensação de conformidade | Médio | Nenhuma. O sistema não deve se apresentar como exaustivo | **Aceito, requer documentação** |
@@ -154,7 +154,7 @@ O ponto 2 é uma decisão de produto ainda não tomada e é, na avaliação da e
 - **MFA obrigatório** para todo papel com acesso à evidência (RNF-19), com a invariante garantida no banco por três triggers, cobrindo alteração pelo usuário, pelo vínculo e pelo papel.
 - **Criptografia:** evidência e dossiê cifrados em repouso; chaves em KMS, apenas referenciadas.
 - **Transporte:** TLS obrigatório entre edge e backend, onde trafega a imagem identificável.
-- **Auditoria imutável:** *append-only* (só aceita inserção), com dupla proteção — um gatilho no banco e a revogação de privilégios (`REVOKE`).
+- **Auditoria imutável:** a trilha não pode ser editada, ter registros excluídos nem ser esvaziada, por gatilhos no banco. A segunda camada, de revogação de privilégios (`REVOKE`), está prevista mas não ativa. Um superusuário do servidor de banco ainda pode desabilitar gatilhos, o que torna o controle desse acesso parte das medidas organizacionais.
 - **Minimização por construção:** desfoque na operação normal; imagem identificável só na suspeita.
 - **Segregação:** o cadastro facial pertence ao hospital; o sistema consulta, não replica.
 

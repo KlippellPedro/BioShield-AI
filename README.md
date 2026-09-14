@@ -59,7 +59,7 @@ Um sistema que filma e identifica profissionais levanta perguntas legítimas. Es
 
 - **Para que serve, e para que não serve.** A finalidade é prevenir infecção e proteger o paciente. O sistema não é ferramenta de controle de produtividade, de ponto ou de avaliação de desempenho — usar os dados dessa forma violaria o princípio da finalidade da Lei Geral de Proteção de Dados (LGPD).
 - **O rosto só é registrado na infração.** Fora dela, a imagem permanece desfocada e ninguém é identificado.
-- **O acesso é restrito e deixa rastro.** Só perfis autorizados, e com autenticação em dois fatores, podem ver uma evidência. Cada visualização fica registrada numa trilha que o próprio banco de dados protege contra alteração e remoção.
+- **O acesso é restrito e deixa rastro.** Só perfis autorizados, e com autenticação em dois fatores, podem ver uma evidência. Cada visualização fica registrada numa trilha de auditoria cujos registros o banco de dados impede de editar.
 - **As imagens não ficam guardadas para sempre.** O prazo padrão é de 90 dias e nunca passa de 180 — o banco de dados recusa prazos maiores. A rotina que apaga automaticamente as imagens vencidas está entre as partes a implementar.
 - **A decisão da máquina pode ser revista.** A LGPD (art. 20) garante a quem é alvo de uma decisão automatizada o direito de pedir revisão. Toda identificação pode ser contestada, e o registro informa se ela foi feita por uma pessoa ou pela IA.
 
@@ -95,11 +95,11 @@ Um sistema que filma e identifica profissionais levanta perguntas legítimas. Es
 O que já está implementado e verificável neste repositório:
 
 - **Segurança imposta pelo banco, não só pela aplicação.** A regra "quem vê evidência precisa de autenticação multifator" é garantida por três gatilhos no PostgreSQL, um para cada caminho pelo qual ela poderia ser contornada: alterar o usuário, o vínculo entre usuário e papel, ou o próprio papel. Fechar só dois deles deixaria a regra aberta pelo terceiro — o que de fato acontecia, e foi corrigido ([ADR-005](docs/architecture.md)).
-- **Trilha de auditoria imutável.** A tabela `audit_logs` só aceita inserção. `UPDATE` e `DELETE` são bloqueados por gatilho e também por revogação de privilégio, em defesa em profundidade. Os registros apontam para seus alvos sem chave estrangeira, para sobreviver ao expurgo das evidências.
+- **Trilha de auditoria imutável para a aplicação.** Na tabela `audit_logs`, `UPDATE`, `DELETE` e `TRUNCATE` são recusados por gatilho, e os registros apontam para seus alvos sem chave estrangeira, para sobreviver ao expurgo das evidências. O `TRUNCATE` exigiu um gatilho à parte: os gatilhos de linha não disparam com ele, e a trilha podia ser esvaziada até essa brecha ser encontrada e corrigida ([detalhes](database/README.md#por-que-o-truncate-precisou-de-um-gatilho-próprio)).
 - **Retenção limitada por restrição no banco.** Uma evidência não pode ser gravada com prazo acima de 180 dias; quem tentar recebe erro, não um aviso.
 - **Minimização de dados no modelo.** Quando faltam vários EPIs no mesmo instante, gera-se um evento por EPI, mas uma única imagem, compartilhada entre eles (relação 1:N).
 - **Decisão automatizada rastreável.** Cada identificação registra se veio de uma pessoa ou da IA, e uma restrição garante coerência: identificação humana exige autor; identificação por IA exige autor nulo.
-- **Testes que provam o que o sistema recusa.** A carga de demonstração tenta cinco operações proibidas. A integração contínua quebra o build se alguma for aceita — ou se menos de cinco bloqueios responderem, o que denunciaria uma proteção removida por engano.
+- **Testes que provam o que o sistema recusa.** A carga de demonstração tenta sete operações proibidas, uma para cada proteção. A integração contínua quebra o build se alguma for aceita — ou se menos de sete bloqueios responderem, o que denunciaria uma proteção removida por engano.
 - **Decisões documentadas, inclusive as abandonadas.** Cada escolha estrutural tem um registro de contexto, decisão e consequência. A ADR-003, superada quando a identificação passou a ser automática, foi mantida como histórico em vez de apagada.
 
 ---
@@ -144,7 +144,7 @@ PostgreSQL 14 ou superior, schema técnico `vigilis`.
 | `identifications` | Quem foi identificado, por quem (pessoa ou IA) e se a identificação foi contestada |
 | `incident_dossiers` | O dossiê PDF de cada incidente, com ciclo pendente → consolidado |
 | `users`, `roles`, `user_roles` | Usuários, perfis de acesso e o vínculo entre eles |
-| `audit_logs` | A trilha imutável de acessos e ações |
+| `audit_logs` | A trilha de acessos e ações, cujos registros não podem ser editados |
 
 O script de criação, com o dicionário de dados completo, está em [`database/schema.sql`](database/schema.sql).
 
@@ -162,7 +162,7 @@ O script de criação, com o dicionário de dados completo, está em [`database/
 
 ## Como executar
 
-Hoje a parte executável é o banco de dados. O procedimento abaixo cria o banco, aplica as regras de segurança e roda a carga de demonstração, que tenta cinco operações proibidas e mostra o banco recusando cada uma.
+Hoje a parte executável é o banco de dados. O procedimento abaixo cria o banco, aplica as regras de segurança e roda a carga de demonstração, que tenta sete operações proibidas e mostra o banco recusando cada uma.
 
 **Pré-requisito:** apenas o [Docker](https://docs.docker.com/get-docker/) (no Windows, o Docker Desktop).
 
@@ -197,7 +197,7 @@ O comando roda o cliente do PostgreSQL dentro de um container, na mesma rede do 
 
 **3. O que você deve ver**
 
-A saída termina com cinco confirmações `OK (esperado)`, uma por proteção:
+A saída termina com sete confirmações `OK (esperado)`, uma por proteção:
 
 | Operação tentada | Proteção que recusa |
 |---|---|
@@ -206,6 +206,8 @@ A saída termina com cinco confirmações `OK (esperado)`, uma por proteção:
 | Guardar uma evidência por mais de 180 dias | Restrição de retenção máxima |
 | Liberar evidências para um perfil que tem membros sem autenticação multifator | Gatilho de MFA no papel |
 | Registrar uma identificação feita pela IA como se tivesse autor humano | Restrição de origem da identificação |
+| Apagar de uma vez toda a trilha de auditoria | Gatilho contra `TRUNCATE` na auditoria |
+| Desligar a autenticação multifator de quem tem acesso às evidências | Gatilho de MFA no usuário |
 
 Se aparecer `FALHA DO TESTE`, alguma proteção deixou passar o que deveria barrar.
 
@@ -280,6 +282,7 @@ BioShield-AI/
 │   ├── 2026-06-18_fix-mfa-bypass.sql
 │   ├── 2026-06-18_identification-source.sql
 │   ├── 2026-09-09_fix-role-privilege-escalation.sql
+│   ├── 2026-09-14_fix-audit-truncate.sql
 │   └── README.md
 │
 ├── docs/                         # ADRs, Relatório de Impacto e emenda do SRS
