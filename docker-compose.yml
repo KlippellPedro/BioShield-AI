@@ -1,7 +1,12 @@
 # === BioShield AI - orquestracao de desenvolvimento ===
 # Sobe banco + backend + frontend (ai_edge opcional). Ajuste conforme os
 # Dockerfiles evoluirem.
-version: "3.9"
+#
+# O nome do projeto e fixo para que a rede se chame sempre
+# "bioshield-ai_default", independentemente do nome da pasta clonada.
+# O README usa essa rede para carregar o schema sem depender da porta 5432
+# do host (que conflita com um PostgreSQL instalado localmente).
+name: bioshield-ai
 
 services:
   db:
