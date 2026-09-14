@@ -1,50 +1,78 @@
-# ai_edge — Filtro de EPI no edge (1ª IA)
+# ai_edge — Detecção de EPI junto às câmeras (1ª IA)
 
-> **Siglas desta pasta.** **EPI** — Equipamento de Proteção Individual. **IA** — Inteligência Artificial. **edge** — a borda da rede: o computador instalado junto às câmeras, onde o vídeo é processado sem precisar trafegar pela rede. **headless** — sem interface gráfica, roda só por linha de comando. Lista completa no [glossário do projeto](../README.md#glossário-de-siglas).
+**Em uma frase:** é o programa que assiste às câmeras da área de risco, reconhece se cada pessoa está usando o Equipamento de Proteção Individual (EPI) obrigatório e, quando algo parece errado, envia uma única imagem da situação para o servidor conferir.
 
-Script *headless* em Python, executado no **edge**, junto às câmeras. É o estágio 1 do pipeline em cascata: faz a triagem rápida de EPI e, ao **suspeitar** de uma infração, captura o snapshot identificável e o envia ao backend para confirmação (2ª IA) e identificação (face match). Ver [ADR-009](../docs/architecture.md).
+Ele roda num computador instalado perto das câmeras — o *edge*, ou borda da rede — e não tem tela: funciona em segundo plano, por linha de comando. Para a visão geral do sistema, veja o [README principal](../README.md).
 
-> **Minimização preservada:** o feed normal é tratado com desfoque e Track IDs efêmeros; a imagem identificável só é materializada e enviada **no instante da suspeita de infração**. Não há captura contínua de imagem identificável.
+> **Siglas desta pasta.** **EPI** — Equipamento de Proteção Individual. **IA** — Inteligência Artificial. **edge** — o computador junto às câmeras, onde o vídeo é processado sem trafegar pela rede. **YOLO** — *You Only Look Once*, família de modelos que detectam objetos em imagens em tempo real. **MOT** — *Multiple Object Tracking*, rastreamento de várias pessoas ao mesmo tempo entre um quadro e outro. **REST / TLS** — o formato das requisições ao servidor e a criptografia que as protege. Lista completa no [glossário do projeto](../README.md#glossário-de-siglas).
+
+---
+
+## O que esta parte faz
+
+1. **Recebe o vídeo** de uma webcam ou de câmeras de rede.
+2. **Desfoca os rostos** na operação normal. Ninguém é identificado aqui.
+3. **Reconhece cada EPI** — máscara, luvas, avental, touca e protetor facial — e associa cada item à pessoa que o está usando.
+4. **Acompanha cada pessoa** por um número temporário (Track ID), que existe só na memória e não diz quem ela é.
+5. **Aplica a regra de tempo.** Ajustar a máscara ou passar a mão na frente do rosto não é infração. Só se o equipamento continuar ausente além do tempo de tolerância da área, o `T_remocao`, a situação vira suspeita.
+6. **Na suspeita, e só nela,** guarda uma imagem nítida e a envia ao backend com os dados do ocorrido.
+
+O edge faz **triagem, não decisão**. Ele não confirma a infração nem descobre quem é a pessoa: isso acontece no [backend](../backend/README.md), onde o dado biométrico é tratado num único lugar, auditável.
+
+**Por que existe essa separação.** Analisar vídeo contínuo com o modelo mais preciso exigiria hardware caro em cada câmera, ou mandar todo o vídeo pela rede. Com um filtro rápido aqui, só as suspeitas saem do edge. Ver [ADR-009](../docs/architecture.md).
+
+---
 
 ## Estado atual
 
-Esqueleto. Todos os arquivos de `src/` existem e carregam, em uma linha de comentário, a responsabilidade que terão — nenhum tem implementação ainda. A tabela abaixo é, portanto, tanto um mapa do que existe quanto o contrato do que cada arquivo deve entregar.
+**Estruturado, ainda sem implementação.** Todos os arquivos abaixo existem e declaram, num comentário, a responsabilidade que terão. Nenhum contém lógica ainda. O `Dockerfile` também é um modelo comentado, e `models/` está vazio: o modelo de detecção ainda não foi escolhido nem treinado.
 
-## Missão — Vinicius (Engenharia de IA / Edge)
+Por isso os comandos de [Como executar](#como-executar) instalam as dependências, mas não produzem nenhum resultado por enquanto.
 
-- **1ª IA (filtro de EPI):** detector YOLO (*You Only Look Once*, família de modelos de detecção de objetos em tempo real) que faz a triagem barata, quadro a quadro.
-- **Lógica do `T_remocao`:** máquina de estados temporal que distingue oclusão de remoção real (Tipo A/B) e decide quando existe suspeita de infração.
-- **Captura e envio:** no instante da suspeita, captura o *snapshot* nítido (identificável) e envia ao backend o pacote `{imagem, track_id, tipo de EPI, zona, timestamp}` por REST (*Representational State Transfer*, o estilo das rotas HTTP) sobre TLS (*Transport Layer Security*, a criptografia em trânsito).
-- **Triagem, não decisão:** o edge não confirma nem identifica sozinho. A 2ª IA (confirmação) e o face match (identificação) ficam no backend, onde o dado biométrico é tratado de forma centralizada e auditável.
+---
 
-## Pipeline (cascata — estágio 1 de 4)
+## Responsável
+
+**Vinicius Ferrari Niffa** — Engenharia de IA e edge.
+
+---
+
+## Como o código está organizado
 
 ```
-Captura -> Detecção (YOLO) -> Rastreamento (MOT) -> Regras temporais -> [suspeita? -> snapshot identificável + envio ao backend]
+Captura -> Detecção (YOLO) -> Rastreamento (MOT) -> Regra temporal -> [suspeita? -> imagem nítida + envio ao backend]
 ```
 
-MOT é *Multiple Object Tracking*, o rastreamento de múltiplos objetos que mantém a identidade de cada pessoa entre um quadro e o seguinte.
-
-## Estrutura de `src/`
-
-| Pasta/arquivo | Responsabilidade |
+| Arquivo | Responsabilidade |
 |---|---|
-| `main.py` | Orquestra o loop quadro a quadro de ponta a ponta. |
-| `config.py` | Carrega parâmetros do `.env` da raiz: FPS (*frames per second*, quadros por segundo), limiares de confiança e `T_remocao`. |
-| `capture/camera_stream.py` | Captura de webcam, RTSP (*Real Time Streaming Protocol*) ou ONVIF (*Open Network Video Interface Forum*) — os dois padrões de câmera de rede; reconexão em falha (RNF-11). |
-| `capture/frame_buffer.py` | Buffer volátil; desfoca o feed normal e libera o quadro nítido só no instante da infração. |
-| `detection/yolo_detector.py` | 1ª IA — inferência YOLO (bounding boxes de EPI e pessoa). |
-| `detection/epi_classes.py` | Mapeia as classes do modelo. |
-| `tracking/tracker.py` | Rastreamento MOT (ByteTrack/DeepSORT); atribui o Track ID efêmero — um número temporário, só em memória, que não identifica ninguém. |
-| `tracking/reid.py` | Re-ID (reidentificação) por silhueta, para não perder a pessoa após uma oclusão. Não é facial — a comparação de rosto fica no backend. |
-| `rules/association.py` | Associa cada EPI à pessoa certa, por IoU (*Intersection over Union*, medida de sobreposição entre caixas) e por anatomia. |
-| `rules/state_machine.py` | Máquina de estados por Track; aplica `T_remocao` e levanta a suspeita (Tipo A/B). |
-| `evidence/snapshot_generator.py` | Captura o snapshot nítido (identificável) da infração para envio. |
-| `api_client/backend_client.py` | Envia `{imagem identificável + metadados}` ao backend (REST/TLS). |
-| `models/` | Pesos `.pt` da 1ª IA. Versionar por Git LFS (*Large File Storage*) ou DVC (*Data Version Control*), ferramentas para arquivos pesados — o `.gitignore` já bloqueia `.pt` e `.onnx` no git puro. |
-| `tests/test_state_machine.py` | Testes da máquina de estados. É o ponto mais crítico da pasta: `T_remocao` é uma regra temporal e erra fácil em oclusão, e nenhum outro estágio consegue corrigir um falso Tipo B gerado aqui. |
+| `src/main.py` | Laço principal: executa o fluxo acima quadro a quadro. |
+| `src/config.py` | Lê do `.env` da raiz a origem da câmera, a taxa de quadros por segundo (FPS), o limiar de confiança do detector e o `T_remocao`. |
+| `src/capture/camera_stream.py` | Captura de webcam ou de câmeras de rede pelos protocolos RTSP e ONVIF, com reconexão automática em caso de falha (RNF-11). |
+| `src/capture/frame_buffer.py` | Mantém os quadros só em memória, aplica o desfoque facial por padrão e libera o quadro nítido apenas no instante da suspeita. |
+| `src/detection/yolo_detector.py` | A 1ª IA: localiza pessoas e cada EPI na imagem. |
+| `src/detection/epi_classes.py` | Traduz as classes do modelo para os tipos de EPI do sistema. |
+| `src/tracking/tracker.py` | Rastreamento (ByteTrack ou DeepSORT) que atribui o Track ID temporário. |
+| `src/tracking/reid.py` | Reidentificação por silhueta, para não perder a pessoa após uma oclusão. Não usa o rosto. |
+| `src/rules/association.py` | Decide a qual pessoa pertence cada EPI detectado, pela sobreposição entre as caixas (IoU) e pela posição no corpo. |
+| `src/rules/state_machine.py` | Máquina de estados por pessoa (entrou, conforme, em remoção). Aplica o `T_remocao` e levanta a suspeita de infração do tipo A (entrada sem EPI) ou B (remoção dentro da área). |
+| `src/evidence/snapshot_generator.py` | Gera a imagem nítida da suspeita. |
+| `src/api_client/backend_client.py` | Envia a suspeita ao backend por REST sobre TLS, de forma assíncrona (RNF-18), sem travar o laço de vídeo. |
+| `models/` | Pesos do modelo de detecção. Arquivos `.pt` e `.onnx` são bloqueados pelo `.gitignore` e devem ser versionados com Git LFS ou DVC. |
+| `tests/test_state_machine.py` | Testes da regra temporal. |
 
-## Como rodar (dev)
+### Os tipos de EPI reconhecidos
+
+Os mesmos definidos no banco de dados: `MASCARA`, `LUVAS`, `AVENTAL`, `TOUCA` e `PROTETOR_FACIAL`. Cada zona de risco define quais deles são obrigatórios.
+
+### O que ainda precisa ser definido
+
+- **O contrato de envio ao backend** — rota, formato do pacote e resposta esperada. O backend tem o arquivo `event_routes.py` reservado para recebê-lo, mas nenhum dos dois lados especificou o formato ainda. É a primeira coisa a combinar entre as duas frentes.
+- **O modelo de detecção** e o conjunto de imagens usado para treiná-lo ou validá-lo.
+- **Versões fixas das dependências.** O `requirements.txt` lista as bibliotecas sem versão.
+
+---
+
+## Como executar
 
 ```bash
 python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
@@ -52,9 +80,14 @@ pip install -r requirements.txt
 python src/main.py
 ```
 
-Configure `CAMERA_SOURCE`, `PROCESSING_FPS`, `CNN_CONF_THRESHOLD`, `T_REMOCAO_SECONDS` e `BACKEND_API_URL` no `.env` da raiz. O edge lê só o `.env`; nada em `config/` se aplica a ele.
+Hoje o `main.py` contém só o comentário de responsabilidade, então o último comando termina sem fazer nada. A instalação baixa bibliotecas pesadas (o Ultralytics traz o PyTorch junto).
+
+A configuração vem do `.env` da raiz do repositório — `CAMERA_SOURCE`, `PROCESSING_FPS`, `CNN_CONF_THRESHOLD`, `T_REMOCAO_SECONDS` e `BACKEND_API_URL`. A descrição de cada variável está em [`config/README.md`](../config/README.md#variáveis-de-ambiente). Nada da pasta `config/` é lido pelo edge.
+
+---
 
 ## Pontos de atenção
 
-- **O snapshot é dado pessoal.** A partir do momento em que `snapshot_generator.py` roda, a imagem deixa de ser anônima. Ela só pode sair daqui por TLS e não deve ser persistida em disco no edge além do necessário para o envio.
-- **Falso positivo aqui custa caro.** Cada suspeita levantada aciona, no backend, uma inferência pesada e um reconhecimento facial contra o cadastro do hospital. O threshold é uma decisão de custo e de privacidade, não só de acurácia.
+- **A regra temporal é o ponto mais delicado do sistema.** Uma remoção falsa detectada aqui — confundir oclusão com retirada do EPI — atravessa o pipeline inteiro e pode terminar num dossiê com o nome de alguém. Os testes de `state_machine.py` são prioridade, e devem rodar com dados simulados, sem câmera e sem modelo.
+- **A imagem da suspeita é dado pessoal.** Assim que é gerada, deixa de ser anônima: só pode sair do edge por TLS e não deve ficar gravada em disco além do tempo necessário para o envio.
+- **O limiar de confiança é uma decisão de privacidade, não só de precisão.** Cada suspeita enviada provoca, no servidor, uma nova análise e um reconhecimento facial. Um limiar baixo demais expõe mais pessoas sem necessidade.

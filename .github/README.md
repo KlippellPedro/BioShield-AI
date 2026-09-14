@@ -1,33 +1,59 @@
-# .github — Integração contínua (CI)
+# .github — Integração contínua
 
-> **Siglas desta pasta.** **CI** — *Continuous Integration*, Integração Contínua: a cada envio de código, um servidor roda automaticamente a análise estática, os testes e a validação do banco, para que um erro não chegue à branch principal sem ser notado. **workflow** — o arquivo YAML que descreve esses passos. **job** — um bloco de passos que roda numa máquina limpa. **lint** — análise estática que aponta erros e desvios de estilo sem executar o código. **pull request** — proposta de mesclar um conjunto de mudanças. Lista completa no [glossário do projeto](../README.md#glossário-de-siglas).
+**Em uma frase:** a cada alteração enviada ao GitHub, um servidor cria um ambiente limpo e verifica automaticamente se o projeto continua funcionando — para que um erro seja percebido na hora, e não semanas depois.
 
-Automação executada pelo GitHub Actions a cada envio de código (*push*) e a cada *pull request*. O objetivo é modesto e proposital: garantir que o que entra na `main` **compila e passa nos testes**, sem transformar a CI num projeto paralelo.
+Essa prática se chama **integração contínua** (CI, de *Continuous Integration*). Os passos ficam descritos em arquivos chamados *workflows*, executados pelo GitHub Actions. Para a visão geral do sistema, veja o [README principal](../README.md).
 
-## Conteúdo atual
+> **Termos desta pasta.** **CI** — Integração Contínua. **workflow** — arquivo que descreve os passos da verificação. **job** — um conjunto de passos executado numa máquina limpa. **análise estática** (*lint*) — leitura automática do código em busca de erros, sem executá-lo. **push** — envio de alterações ao GitHub. **pull request** — pedido para incorporar um conjunto de alterações. Lista completa no [glossário do projeto](../README.md#glossário-de-siglas).
 
-| Workflow | Papel |
-|---|---|
-| `workflows/database-ci.yml` | Sobe um PostgreSQL de serviço, aplica baseline, migrações e seed, e **exige que as cinco proteções de negócio barrem o que devem barrar**. Verifica ainda que as migrações são idempotentes e que o seed não duplica dado ao ser reexecutado. |
-| `workflows/backend-ci.yml` | Análise estática (ruff) e testes (pytest) do backend. |
-| `workflows/frontend-ci.yml` | Verificação de tipos e build do frontend. |
-| `workflows/edge-ci.yml` | Análise estática e testes do `ai_edge`. |
+---
 
-### Por que o workflow de banco é o mais importante
+## Os quatro workflows
 
-O banco é a única frente implementada, e é nele que moram as garantias de LGPD e RNF-19 — os três triggers de MFA, a imutabilidade da auditoria, o teto de retenção e a coerência da origem da identificação. O `seed.sql` funciona como suíte de aceitação: tenta cinco operações que **devem** ser rejeitadas e imprime `FALHA DO TESTE` se alguma passar. O workflow quebra o build nesse caso e também se o número de bloqueios confirmados cair abaixo de cinco — o que pegaria uma guarda removida do schema por acidente.
+| Workflow | Situação | O que verifica |
+|---|---|---|
+| [`database-ci.yml`](workflows/database-ci.yml) | [![database-ci](https://github.com/KlippellPedro/BioShield-AI/actions/workflows/database-ci.yml/badge.svg)](https://github.com/KlippellPedro/BioShield-AI/actions/workflows/database-ci.yml) | Cria o banco, aplica as migrações, roda a demonstração e exige que as sete proteções recusem o que devem recusar. |
+| [`backend-ci.yml`](workflows/backend-ci.yml) | [![backend-ci](https://github.com/KlippellPedro/BioShield-AI/actions/workflows/backend-ci.yml/badge.svg)](https://github.com/KlippellPedro/BioShield-AI/actions/workflows/backend-ci.yml) | Análise estática com ruff e testes com pytest. |
+| [`frontend-ci.yml`](workflows/frontend-ci.yml) | [![frontend-ci](https://github.com/KlippellPedro/BioShield-AI/actions/workflows/frontend-ci.yml/badge.svg)](https://github.com/KlippellPedro/BioShield-AI/actions/workflows/frontend-ci.yml) | Verificação de tipos do TypeScript e build do Vite. |
+| [`edge-ci.yml`](workflows/edge-ci.yml) | [![edge-ci](https://github.com/KlippellPedro/BioShield-AI/actions/workflows/edge-ci.yml/badge.svg)](https://github.com/KlippellPedro/BioShield-AI/actions/workflows/edge-ci.yml) | Análise estática com ruff e testes com pytest. |
 
-### Comportamento durante a fase de esqueleto
+### Como ler esses selos hoje
 
-Backend, frontend e edge ainda não têm código. Em vez de fingir sucesso, os workflows detectam esse estado e emitem um **aviso** explícito (pytest sem testes coletados, `package.json` sem dependências). Assim que houver código real, eles passam a exigir de verdade, sem precisar de alteração.
+**Só o `database-ci` testa algo real.** O banco é a única parte implementada, e o workflow executa de fato as regras de segurança.
 
-## O que ainda entra aqui
+Os outros três aprovam porque ainda **não há código para verificar**. Em vez de fingir que testaram algo, eles detectam essa situação e deixam um aviso na execução: "nenhum teste coletado" no backend e no edge, "package.json sem dependências" no frontend. Quando o código chegar, passam a exigir de verdade, sem precisar de alteração.
 
-- Um job que rode o expurgo de retenção contra dados vencidos, quando `jobs/purge_evidence.py` sair do esqueleto. É a verificação que falta para fechar o ciclo de vida do dado pessoal na CI.
-- Cobertura de teste como métrica, quando houver testes suficientes para o número significar algo.
+---
+
+## Quando cada workflow roda
+
+- **Num push**, apenas se a alteração tocar a parte correspondente. O `database-ci` roda quando mudam `database/`, `migrations/` ou o `scripts/apply_schema.sh`; os demais, quando muda a pasta da sua aplicação. Todos rodam também quando o próprio arquivo do workflow é alterado. Um push que altera só documentação da raiz não dispara nenhum deles.
+- **Num pull request**, os quatro rodam sempre.
+- **Manualmente**, pela aba *Actions* do GitHub, com o botão *Run workflow*.
+
+---
+
+## O `database-ci` em detalhe
+
+É o mais importante, porque o banco concentra as garantias de segurança e de proteção de dados do projeto. Em ordem, ele:
+
+1. sobe um PostgreSQL 16 temporário;
+2. cria o banco, aplica as migrações e roda a demonstração do `seed.sql`;
+3. **falha** se alguma das sete operações proibidas for aceita, ou se menos de sete bloqueios responderem — o que denunciaria uma proteção removida por engano;
+4. reaplica as migrações duas vezes, para provar que podem ser executadas de novo sem erro;
+5. reexecuta a demonstração e confere que nenhum dado foi duplicado.
+
+---
 
 ## Cuidados
 
-- A CI **não** deve baixar pesos de modelo (`.pt`/`.onnx`) nem tocar em evidência: os testes precisam rodar com dublês, não com dado real. O `edge-ci.yml` deliberadamente não instala `ultralytics`/`opencv` por isso — testar a máquina de estados do `T_remocao` não exige modelo nem câmera.
-- Nenhum secret do projeto está configurado neste repositório. Se algum workflow passar a precisar de credencial, ela vai em *repository secrets*, nunca no YAML.
-- A senha do PostgreSQL no `database-ci.yml` é de um container efêmero de CI, descartado ao fim do job. Não reaproveite esse padrão fora daqui.
+- **Nenhum dado real, nenhum modelo de IA.** Os testes devem usar dados simulados. Por isso o `edge-ci` não instala Ultralytics nem OpenCV: testar a regra de tempo da detecção não exige modelo nem câmera.
+- **Nenhum segredo nos arquivos.** Nenhum workflow usa credenciais hoje. Se algum passar a precisar, ela deve ser cadastrada nos *secrets* do repositório no GitHub, nunca escrita no arquivo.
+- **A senha do banco no `database-ci`** é de um container temporário, destruído ao fim da execução. Não reaproveite esse padrão em outro contexto.
+
+---
+
+## O que ainda entra aqui
+
+- Um passo que teste o expurgo de evidências vencidas, quando `backend/jobs/purge_evidence.py` for implementado.
+- Medição de cobertura de testes, quando houver testes suficientes para o número dizer alguma coisa.

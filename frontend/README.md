@@ -1,54 +1,106 @@
-# frontend — Dashboard do gestor
+# frontend — Painel do gestor
 
-> **Siglas desta pasta.** **SPA** — *Single Page Application*, aplicação de página única: carrega uma vez e atualiza o conteúdo sem recarregar a página. **UI** — *User Interface*, a interface de usuário. **API** — a interface do backend que esta aplicação consome. **SSE** — *Server-Sent Events*, canal em que o servidor empurra atualizações ao navegador. **MFA** — Autenticação Multifator. **RBAC** — Controle de Acesso Baseado em Papéis. **LGPD** — Lei Geral de Proteção de Dados. Lista completa no [glossário do projeto](../README.md#glossário-de-siglas).
+**Em uma frase:** é o site interno onde a equipe do hospital recebe os alertas de infração em tempo real, configura as áreas de risco, revisa quem foi identificado pelo sistema e consulta os dossiês dos incidentes.
 
-SPA web onde a gerência hospitalar acompanha alertas em tempo real, gerencia zonas de risco, **revisa a identificação automática** dos profissionais e acessa os dossiês. Tecnologias: React, Vite (servidor de desenvolvimento e empacotador), TypeScript e Tailwind CSS. Consome a API REST e o canal de tempo real do [`backend/`](../backend/README.md).
+É também a parte que garante, na prática, um direito do profissional: como a identificação é feita automaticamente pela inteligência artificial, é neste painel que uma pessoa revisa essa decisão e registra uma contestação quando for o caso. Para a visão geral do sistema, veja o [README principal](../README.md).
 
-Esta é a frente que dá corpo à salvaguarda do art. 20 da LGPD: como a identificação passou a ser automática (ADR-010), é aqui que o ser humano entra para revisar e, se for o caso, contestar o que a IA decidiu.
+> **Siglas desta pasta.** **SPA** — *Single Page Application*: o site carrega uma vez e atualiza as informações sem recarregar a página. **API** — as rotas do backend que o painel consome. **SSE** — *Server-Sent Events*, canal pelo qual o servidor envia atualizações ao navegador. **MFA** — autenticação multifator. **RBAC** — controle de acesso baseado em perfis. **LGPD** — Lei Geral de Proteção de Dados. Lista completa no [glossário do projeto](../README.md#glossário-de-siglas).
+
+---
+
+## Quem usa o painel
+
+Os perfis abaixo já estão cadastrados no banco de dados. O painel deve mostrar a cada um apenas o que o perfil permite.
+
+| Perfil | Quem é | O que faz | Vê as imagens das infrações |
+|---|---|---|---|
+| Operador de Segurança | Equipe de monitoramento | Recebe e trata os alertas em tempo real | Sim |
+| Enfermagem-chefe | Liderança de enfermagem | Trata alertas e conduz a revisão visual da evidência | Sim |
+| Gestor de Qualidade / CCIH | Comissão de Controle de Infecção Hospitalar | Analisa relatórios agregados de conformidade | Não |
+| Administrador de TI | Equipe técnica | Configura câmeras, zonas e parâmetros | Não |
+| Encarregado de Dados (DPO) | Responsável pela LGPD na instituição | Audita a conformidade e o ciclo de vida das evidências | Sim — revisável pela instituição |
+
+Todo perfil que vê imagens exige autenticação em dois fatores. No caso do Encarregado de Dados, o acesso às imagens é uma decisão de política institucional: se a instituição entender que ele deve ver apenas registros e metadados, basta retirar a permissão.
+
+---
+
+## Telas previstas
+
+| Tela | Para que serve |
+|---|---|
+| **Login** | Entrada com usuário, senha e segundo fator. |
+| **Painel de alertas** | Infrações chegando em tempo real — meta de até 3 segundos após a detecção — e indicadores de conformidade por área. |
+| **Zonas de risco** | Cadastro das áreas monitoradas, dos EPIs obrigatórios de cada uma e do tempo de tolerância `T_remocao`. |
+| **Detalhe do evento** | Marca o alerta como tratado, mostra quem foi identificado e se a identificação foi feita pela IA ou por uma pessoa, e permite contestá-la. |
+| **Visualizador de evidência** | Exibe a imagem da infração a quem tem permissão. Cada abertura fica registrada na trilha de auditoria. |
+| **Dossiês** | Lista e download dos PDFs dos incidentes, pendentes ou consolidados. |
+
+---
 
 ## Estado atual
 
-Esqueleto. `package.json`, `vite.config.ts` e `tsconfig.json` existem, mas as dependências ainda não foram declaradas (`dependencies` e `devDependencies` estão vazias) e todos os componentes e páginas são placeholders de uma linha. O primeiro passo concreto é instalar React, Vite, TypeScript, Tailwind e axios e fazer o `npm run dev` subir de fato.
+**Estruturado, ainda sem implementação.** Os arquivos de página e componente existem e declaram, num comentário, o que farão. O `index.html` e o `tsconfig.json` estão prontos, mas o `package.json` ainda não declara nenhuma dependência e o `vite.config.ts` é só um comentário. O `Dockerfile` também é um modelo comentado.
 
-## Missão — Carlos (Frontend Web / UI)
+Na prática, **o painel ainda não abre**: `npm run dev` falha porque o Vite não está instalado. O primeiro passo concreto é declarar React, Vite, TypeScript, Tailwind CSS e axios no `package.json` e configurar o Vite.
 
-- **Dashboard em tempo real:** consumo de WebSocket ou SSE para exibir os alertas em até 3 s (RNF-05, Requisito Não Funcional 05).
-- **Revisão e oversight:** com a identificação feita automaticamente pela IA, o gestor revisa e confirma o resultado antes ou depois do despacho, atuando como controle humano da decisão automatizada (LGPD art. 20).
-- **Contestação:** tela para registrar a contestação de uma identificação (`identifications` passando a CONTESTADA ou REVOGADA).
-- **Auditoria e relatórios:** visualizador restrito da evidência e tela dos dossiês (PDF, ciclo PENDENTE/CONSOLIDADO).
+---
 
-## Estrutura de `src/`
+## Responsável
 
-| Pasta/arquivo | Responsabilidade |
+**Carlos Eduardo Cavalcante da Rocha** — Frontend web e interface.
+
+---
+
+## Como o código está organizado
+
+Tecnologias previstas: React, Vite, TypeScript e Tailwind CSS.
+
+| Arquivo | Responsabilidade |
 |---|---|
-| `main.tsx` / `App.tsx` | Bootstrap do React e definição de rotas. |
-| `api/client.ts` | Cliente HTTP (axios) com *interceptor* — a camada que anexa o token de sessão a cada requisição e trata o desafio de MFA. |
-| `hooks/useRealtimeAlerts.ts` | Assina o canal WebSocket/SSE de alertas. |
-| `store/authStore.ts` | Estado global de sessão e permissões (RBAC no lado do cliente). |
-| `pages/Login.tsx` | Login e desafio de MFA. |
-| `pages/Dashboard.tsx` | Alertas em tempo real e indicadores de conformidade. |
-| `pages/Zones.tsx` | Gestão de zonas de risco e parâmetros (EPIs obrigatórios, `T_remocao`). |
-| `pages/EventDetail.tsx` | Revisão da identificação automática e acknowledge; aciona a contestação (art. 20). |
-| `pages/EvidenceViewer.tsx` | Visualização restrita do *snapshot*; cada abertura gera um registro `EVIDENCE_VIEW` na trilha de auditoria. |
-| `pages/Dossiers.tsx` | Fila e download dos dossiês PDF (PENDENTE/CONSOLIDADO). |
-| `components/` | Componentes reutilizáveis (`AlertCard`, `DataTable`). |
-| `styles/index.css` | Tailwind e estilos base. |
+| `index.html` | Página base onde o React é montado. |
+| `src/main.tsx`, `src/App.tsx` | Inicialização do React e definição das rotas entre telas. |
+| `src/api/client.ts` | Cliente HTTP (axios) que anexa o token de sessão a cada requisição e trata o desafio do segundo fator. |
+| `src/hooks/useRealtimeAlerts.ts` | Assina o canal de alertas em tempo real (WebSocket ou SSE). |
+| `src/store/authStore.ts` | Estado da sessão e das permissões do usuário logado. |
+| `src/pages/Login.tsx` | Tela de login. |
+| `src/pages/Dashboard.tsx` | Painel de alertas. |
+| `src/pages/Zones.tsx` | Zonas de risco. |
+| `src/pages/EventDetail.tsx` | Detalhe do evento, revisão e contestação. |
+| `src/pages/EvidenceViewer.tsx` | Visualizador de evidência. |
+| `src/pages/Dossiers.tsx` | Dossiês. |
+| `src/components/` | Componentes reutilizáveis: `AlertCard` e `DataTable`. |
+| `src/styles/index.css` | Tailwind e estilos base. |
 | `public/favicon.svg` | Ícone da aplicação. |
 
-## O que ainda entra aqui
+### Estados que as telas precisam representar
 
-- Declaração das dependências no `package.json` e configuração do Tailwind.
-- Uma tela ou seção que deixe visível **quando a identificação veio da IA e quando veio de um humano** — o banco já distingue os dois casos em `identifications.source`, e essa distinção precisa aparecer para o gestor. Revisar uma decisão automatizada sem saber que ela foi automatizada não cumpre o art. 20.
-- Testes das telas de revisão e contestação, que são o caminho crítico da conformidade.
+Valores definidos no banco de dados, que o painel vai exibir e alterar:
 
-## Como rodar (dev)
+| Conceito | Valores |
+|---|---|
+| Alerta | `PENDENTE` → `RECONHECIDO` ou `DESCARTADO` |
+| Identificação | `CONFIRMADA`, `CONTESTADA`, `REVOGADA` |
+| Origem da identificação | `HUMAN` (feita por uma pessoa) ou `AI` (feita pelo reconhecimento facial) |
+| Dossiê | `PENDENTE` → `CONSOLIDADO` |
 
-```bash
-npm install
-npm run dev      # sobe o Vite; o proxy para a API é configurado em vite.config.ts
-```
+---
 
 ## Pontos de atenção
 
-- O RBAC no cliente é **conveniência de interface, não controle de acesso**. Esconder um botão não protege nada: o acesso à evidência e à revisão exige usuário autenticado com MFA e papel autorizado, e quem recusa o resto é o backend.
-- A evidência é dado pessoal identificável. Não a mantenha em cache no navegador nem a exponha em URL (*Uniform Resource Locator*, o endereço da página) — endereços vazam por histórico, log de servidor e barra de compartilhamento.
+- **Mostrar a origem da identificação não é detalhe visual.** O art. 20 da LGPD garante revisão de decisões automatizadas, e ninguém revisa de verdade uma decisão sem saber que ela foi automatizada. A tela de detalhe precisa deixar claro quando o nome veio da IA.
+- **Revisar antes ou depois do envio à diretoria ainda é uma decisão em aberto.** Um dossiê enviado e depois revogado não desfaz o dano a quem foi identificado por engano. A tela deve ser pensada para suportar uma janela de revisão prévia, se o projeto adotá-la.
+- **Esconder um botão não é controle de acesso.** As permissões no navegador servem para a interface ficar coerente; quem de fato bloqueia o acesso é o backend e o banco.
+- **A imagem da infração é dado pessoal.** Não deve ficar em cache do navegador nem aparecer em endereços de página: URLs vazam por histórico, registros de servidor e compartilhamento.
+
+---
+
+## Como executar
+
+Quando as dependências forem declaradas:
+
+```bash
+npm install
+npm run dev      # sobe o servidor de desenvolvimento do Vite
+```
+
+Hoje o `npm run dev` ainda falha, pelos motivos descritos em [Estado atual](#estado-atual).
