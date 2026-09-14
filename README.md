@@ -1,226 +1,318 @@
 # BioShield AI
 
-> **A proteção que dura o procedimento inteiro.**
-> Monitoramento de conformidade de **EPI** (Equipamento de Proteção Individual) por **visão computacional temporal** em áreas hospitalares de risco — detectando, em tempo real, tanto a **entrada não conforme** quanto a **remoção indevida** do equipamento dentro da área.
+**A proteção que dura o procedimento inteiro.**
 
-**Base normativa:** SRS (*Software Requirements Specification*, a Especificação de Requisitos de Software) do BioShield AI, **v1.3** (em revisão para **v1.4**, ver [ADR-010](docs/architecture.md)) · ISO/IEC 25010 · IEEE 830 · **LGPD** (Lei 13.709/2018)
-**Status:** monorepo estruturado, em desenvolvimento. O **banco de dados está implementado** (DDL, triggers, seed e duas migrações aplicadas); o código das três frentes ainda é **esqueleto** — os arquivos existem e documentam sua responsabilidade em uma linha de comentário, mas não têm implementação.
-**Arquitetura:** Web desacoplado (frontend + backend separados) com **IA em cascata** (filtro no edge → confirmação + identificação no backend). Ver [ADR-009](docs/architecture.md) — as ADRs (*Architecture Decision Records*) são os registros de decisão de arquitetura do projeto.
+Sistema de visão computacional que acompanha, em tempo real, o uso de Equipamento de Proteção Individual (EPI) — máscara, luvas, avental, touca e protetor facial — em áreas hospitalares de risco, como UTI, centro cirúrgico e isolamento. Ele percebe tanto quem **entra na área sem o equipamento** quanto quem **o retira durante a permanência**, e avisa a equipe responsável em segundos.
 
-> Este README usa siglas de quatro áreas diferentes. Todas estão expandidas no [glossário](#glossário-de-siglas), ao final.
+[![database-ci](https://github.com/KlippellPedro/BioShield-AI/actions/workflows/database-ci.yml/badge.svg)](https://github.com/KlippellPedro/BioShield-AI/actions/workflows/database-ci.yml)
 
----
+| | |
+|---|---|
+| **Contexto** | Projeto acadêmico do Curso Técnico em Desenvolvimento de Sistemas do Senac-RS, na Campanha Senac & Sesc Saúde. Equipe de três pessoas, com orientação do Prof. Miguel Matiolla. |
+| **Fase atual** | Arquitetura, modelagem e documentação concluídas. **Banco de dados implementado e testado automaticamente.** As aplicações — IA de detecção, API e painel — estão estruturadas e em implementação. Detalhes em [Estado do projeto](#estado-do-projeto). |
+| **Tecnologias** | Python · Flask · PostgreSQL · React · TypeScript · YOLOv8 · Docker · GitHub Actions |
 
-## O que é
+**Por onde começar a ler**
 
-O BioShield AI processa fluxos de câmeras (RTSP/ONVIF ou webcam) em unidades de risco (UTI, centro cirúrgico, isolamento) para:
-
-- **Detectar** EPI por classe (máscara, luvas, avental, touca, protetor facial) e vinculá-lo à pessoa (1ª IA, no edge).
-- **Rastrear** cada profissional por um **Track ID efêmero** — um identificador temporário, interno e em memória — no *edge* (o computador instalado junto às câmeras).
-- **Confirmar** a infração com uma **2ª IA** (Inteligência Artificial) mais robusta no backend e **identificar** o profissional por **reconhecimento facial** contra o cadastro do hospital.
-- **Disparar alertas** de dois tipos de infração:
-  - **Tipo A** — entrada na área de risco **sem** o EPI obrigatório.
-  - **Tipo B** — **remoção** de um EPI já confirmado, detectada por análise temporal (`T_remocao`).
-- **Gerar e despachar** o **dossiê PDF nominal** consolidado para a diretoria.
-
-### Tratamento de dados e LGPD
-
-O BioShield AI processa **dado pessoal e biométrico sensível**: no instante de uma **infração confirmada**, captura uma imagem **identificável** e realiza **identificação automatizada** (reconhecimento facial) contra o cadastro do hospital para gerar o dossiê nominal. A **operação normal é minimizada** (feed com desfoque, Track IDs efêmeros) — a imagem identificável só existe na infração. Por envolver **biometria** e **decisão automatizada**, o tratamento exige base legal específica e **Relatório de Impacto** — DPIA (*Data Protection Impact Assessment*) ou, no vocabulário da LGPD, RIPD (Relatório de Impacto à Proteção de Dados Pessoais), e mantém ao titular o **direito de revisão e contestação** (LGPD art. 20). Detalhes e obrigações em [ADR-010](docs/architecture.md).
+- **Área da saúde, ou sem formação em programação:** [O problema](#o-problema), [Como funciona](#como-funciona-em-linguagem-simples) e [Privacidade e o profissional de saúde](#privacidade-e-o-profissional-de-saúde).
+- **Avaliação e recrutamento:** [Estado do projeto](#estado-do-projeto) e [Destaques técnicos](#destaques-técnicos).
+- **Desenvolvimento:** [Arquitetura](#arquitetura), [Como executar](#como-executar) e [Documentação](#documentação).
+- **Alguma sigla desconhecida:** [Glossário](#glossário-de-siglas).
 
 ---
 
-## Arquitetura (engenharia em cascata)
+## O problema
 
-Sistema **Web desacoplado** — não uma aplicação Desktop. Pipeline de IA em **quatro estágios**:
+As **Infecções Relacionadas à Assistência à Saúde (IRAS)** são infecções que o paciente adquire em consequência do próprio cuidado que recebe no hospital. O EPI é uma das barreiras mais básicas contra elas: protege o paciente de quem o atende e protege o profissional do que está tratando. Por isso seu uso em serviços de saúde é regulado, entre outras normas, pela NR-32, que trata da segurança e saúde no trabalho nesses ambientes.
 
-1. **`ai_edge/` — Filtro (1ª IA):** script **headless** (sem interface gráfica, roda só por linha de comando) no *edge*; ao **suspeitar** de falta de EPI, captura o snapshot **identificável** e envia ao backend.
-2. **`backend/` — Confirmação (2ª IA):** modelo mais robusto reconfirma com precisão se há a infração.
-3. **`backend/` — Identificação (Face Match):** reconhecimento facial da evidência contra o **banco do hospital** → resolve nome/matrícula.
-4. **`backend/` — Dossiê:** gera o **PDF nominal consolidado** e despacha à diretoria. O **`frontend/`** dá ao gestor a **revisão/contestação** (controle humano da decisão automatizada, art. 20).
+Verificar se alguém entrou paramentado é relativamente simples. O difícil é o que acontece depois: a máscara abaixada para atender o telefone, a luva retirada para digitar, o protetor facial erguido porque embaçou. São gestos rápidos, muitas vezes automáticos, e acontecem justamente durante o procedimento, quando ninguém está observando. Auditorias presenciais acompanham só uma fração do tempo e não conseguem cobrir cada minuto de cada plantão.
 
-**Por quê:** implantação simples no hospital, divisão clara de trabalho, WebSockets nativos para alertas em até 3 s, e o dado biométrico tratado num único ponto auditável. Ver [ADR-009](docs/architecture.md) e [ADR-010](docs/architecture.md).
+O BioShield AI foi pensado para essa lacuna: **não apenas conferir a entrada, mas manter a verificação durante toda a permanência na área de risco.**
 
 ---
 
-## Stack tecnológica
+## Como funciona, em linguagem simples
 
-| Frente                   | Tecnologias                                                                            |
-| ------------------------ | -------------------------------------------------------------------------------------- |
-| **ai_edge** (1ª IA)      | Python · Ultralytics **YOLOv8** (*You Only Look Once*, detector de objetos) · OpenCV · ByteTrack/DeepSORT (rastreadores MOT, *Multiple Object Tracking*) |
-| **backend** (API + IA)   | Python · **Flask** · SQLAlchemy (ORM) · Alembic (migrações) · Flask-SocketIO · PyJWT (*JSON Web Token*) · pyotp (TOTP, segundo fator) · ReportLab (PDF) · reconhecimento facial |
-| **frontend** (dashboard) | **React** · Vite · TypeScript · Tailwind CSS                                           |
-| **database**             | **PostgreSQL 14+** (SGBD relacional; schema técnico `vigilis`)                          |
-| **infra**                | Docker · docker-compose · GitHub Actions (CI, Integração Contínua)                      |
+Este é o funcionamento projetado. O que já está implementado aparece em [Estado do projeto](#estado-do-projeto).
+
+1. **A câmera observa sem identificar ninguém.** Na operação normal, a imagem é processada com os rostos desfocados. O sistema sabe que há "uma pessoa" usando determinados equipamentos e a acompanha por um número temporário, nunca pelo nome.
+2. **A inteligência artificial percebe que falta algo.** Um primeiro modelo, rodando num computador junto às câmeras, reconhece cada EPI e percebe quando um item obrigatório está ausente ou foi retirado.
+3. **O sistema espera antes de alarmar.** Passar a mão na frente do rosto ou ajustar a máscara não é uma infração. Por isso existe um tempo de tolerância, o `T_remocao`, configurável por área (5 segundos no exemplo de demonstração): só se o equipamento continuar ausente além desse prazo a situação vira suspeita.
+4. **Registra a evidência — e só nesse momento.** No instante da suspeita, e apenas nele, o sistema guarda uma imagem nítida da situação.
+5. **Uma segunda IA confere.** No servidor, um modelo mais preciso reavalia a imagem. Se não confirmar a infração, a suspeita é descartada.
+6. **Identifica o profissional.** Confirmada a infração, o sistema compara o rosto com o cadastro de funcionários do hospital para obter nome e matrícula.
+7. **Avisa e documenta.** O alerta aparece no painel da equipe responsável — a meta é em até 3 segundos — e é gerado um dossiê em PDF do incidente, encaminhado à diretoria.
+8. **Uma pessoa revisa.** O gestor pode revisar a identificação feita pela máquina, e o profissional tem o direito de contestá-la.
+
+O sistema reconhece dois tipos de infração:
+
+| Tipo | O que é | Exemplo |
+|---|---|---|
+| **A — entrada não conforme** | Entrar na área de risco sem algum EPI obrigatório | Entrar no quarto de isolamento sem avental |
+| **B — remoção indevida** | Retirar, dentro da área, um EPI que estava sendo usado | Abaixar a máscara na UTI para atender o telefone |
 
 ---
 
-## Estrutura do monorepo
+## Privacidade e o profissional de saúde
 
-```
-bioshield-ai/
-│
-├── ai_edge/                      # FILTRO DE EPI / 1ª IA no edge — headless (Vinicius)
-│   ├── src/
-│   │   ├── main.py               # Loop principal: captura → detecção → tracking → regras → [suspeita: snapshot + envio]
-│   │   ├── config.py             # Lê parâmetros (FPS, thresholds, T_remocao) do .env
-│   │   ├── capture/
-│   │   │   ├── camera_stream.py  # Captura webcam/RTSP/ONVIF; reconexão em falha (RNF-11)
-│   │   │   └── frame_buffer.py   # Desfoca o feed normal; libera o quadro nítido só na infração
-│   │   ├── detection/
-│   │   │   ├── yolo_detector.py  # 1ª IA — YOLO (bounding boxes de EPI/pessoa)
-│   │   │   └── epi_classes.py    # Mapa de classes do modelo
-│   │   ├── tracking/
-│   │   │   ├── tracker.py        # ByteTrack/DeepSORT; Track ID efêmero
-│   │   │   └── reid.py           # Re-ID por silhueta (não-facial; face match é no backend)
-│   │   ├── rules/
-│   │   │   ├── association.py    # Associa EPI ↔ pessoa por IoU/anatomia
-│   │   │   └── state_machine.py  # Máquina de estados; T_remocao; levanta a suspeita (Tipo A/B)
-│   │   ├── evidence/
-│   │   │   └── snapshot_generator.py  # Captura o snapshot identificável da infração
-│   │   └── api_client/
-│   │       └── backend_client.py # Envia {imagem identificável + metadados} ao backend (REST/TLS)
-│   ├── models/                   # Pesos da 1ª IA (YOLO) — Git LFS/DVC, não no git puro
-│   ├── tests/test_state_machine.py    # Regra temporal do T_remocao — o teste mais crítico da pasta
-│   └── Dockerfile · requirements.txt · README.md
-│
-├── backend/                      # API / 2ª IA / FACE MATCH / SEGURANÇA / DB (Pedro)
-│   ├── app/
-│   │   ├── __init__.py · extensions.py · config.py
-│   │   ├── models/               # SQLAlchemy do schema vigilis (user, zone, event, evidence,
-│   │   │                         #   identification, dossier, audit_log)
-│   │   ├── api/                  # Blueprints REST (auth, event = ingestão da imagem do edge,
-│   │   │                         #   evidence, identification, dossier, zone, report)
-│   │   ├── services/
-│   │   │   ├── epi_validation_service.py    # 2ª IA: reconfirma a infração de EPI
-│   │   │   ├── face_match_service.py        # Reconhecimento facial (biométrico) — ADR-010
-│   │   │   ├── hospital_registry_service.py # Integração com o cadastro do hospital (nome/matrícula)
-│   │   │   ├── pdf_service.py               # Dossiê nominal consolidado + despacho à diretoria
-│   │   │   └── ...                          # audit, rules, evidence, identification, retention, auth
-│   │   ├── schemas/ · sockets/ (tempo real, RNF-05) · utils/ (crypto/KMS, decorators)
-│   ├── models/                   # Pesos da 2ª IA + modelo de face match (Git LFS/DVC)
-│   ├── jobs/purge_evidence.py    # Expurgo por retenção (90/180 dias)
-│   ├── tests/                    # test_auth_mfa.py · test_dossier_rules.py
-│   └── wsgi.py · Dockerfile · requirements.txt · README.md
-│
-├── frontend/                     # DASHBOARD DO GESTOR — revisão/contestação (Carlos)
-│   ├── src/
-│   │   ├── main.tsx · App.tsx · api/client.ts · store/authStore.ts
-│   │   ├── hooks/useRealtimeAlerts.ts   # Canal WebSocket/SSE de alertas
-│   │   ├── pages/                # Login, Dashboard, Zones, EventDetail (revisão),
-│   │   │                         #   EvidenceViewer, Dossiers
-│   │   ├── components/           # AlertCard · DataTable
-│   │   └── styles/index.css      # Tailwind + base
-│   ├── public/favicon.svg
-│   └── index.html · package.json · vite.config.ts · tsconfig.json · Dockerfile · README.md
-│
-├── database/                     # BANCO DE DADOS (PostgreSQL · schema vigilis) — implementado
-│   ├── schema.sql                # DDL canônico (v1.3) + dicionário de dados completo
-│   ├── seed.sql                  # Seed de demonstração que valida as regras de negócio
-│   ├── migrations/               # Esqueleto Alembic (env.py, script.py.mako, versions/)
-│   └── README.md
-│
-├── migrations/                   # Migrações SQL manuais — trilha ativa do banco (Pedro)
-│   ├── 2026-06-18_fix-mfa-bypass.sql          # Trigger anti-bypass de MFA (RNF-19)
-│   ├── 2026-06-18_identification-source.sql   # Origem da identificação: HUMAN | AI (ADR-010)
-│   └── README.md
-│
-├── config/                       # Configuração de serviço (gunicorn, logging, conexão) + README
-├── docs/                         # ADRs e documentação de entrega (SRS e DPIA ainda a incluir)
-├── scripts/                      # Utilitários de dev/ops (apply_schema, run_dev, reset_db) + README
-├── .github/workflows/            # CI (lint + testes do backend e do frontend) + README
-│
-├── docker-compose.yml · .env.example · .gitignore · .dockerignore · Makefile · README.md
+Um sistema que filma e identifica profissionais levanta perguntas legítimas. Estas são as respostas do projeto. As regras de acesso, rastreabilidade, prazo máximo e contestação já estão impostas no banco de dados; o desfoque das imagens e o reconhecimento facial fazem parte das aplicações ainda em implementação.
+
+- **Para que serve, e para que não serve.** A finalidade é prevenir infecção e proteger o paciente. O sistema não é ferramenta de controle de produtividade, de ponto ou de avaliação de desempenho — usar os dados dessa forma violaria o princípio da finalidade da Lei Geral de Proteção de Dados (LGPD).
+- **O rosto só é registrado na infração.** Fora dela, a imagem permanece desfocada e ninguém é identificado.
+- **O acesso é restrito e deixa rastro.** Só perfis autorizados, e com autenticação em dois fatores, podem ver uma evidência. Cada visualização fica registrada numa trilha que o próprio banco de dados protege contra alteração e remoção.
+- **As imagens não ficam guardadas para sempre.** O prazo padrão é de 90 dias e nunca passa de 180 — o banco de dados recusa prazos maiores. A rotina que apaga automaticamente as imagens vencidas está entre as partes a implementar.
+- **A decisão da máquina pode ser revista.** A LGPD (art. 20) garante a quem é alvo de uma decisão automatizada o direito de pedir revisão. Toda identificação pode ser contestada, e o registro informa se ela foi feita por uma pessoa ou pela IA.
+
+**O que ainda precisa ser resolvido antes de uso real.** O reconhecimento facial trata dado biométrico, que a LGPD classifica como sensível. Isso exige uma base legal específica, que depende de parecer jurídico da instituição — até lá, o projeto trabalha apenas com dados de demonstração. Outro ponto em aberto: a imagem de uma infração numa UTI pode mostrar também o paciente, que não é alvo do sistema. A análise completa, com nove riscos mapeados e as medidas de cada um, está no [Relatório de Impacto à Proteção de Dados](docs/DPIA_RIPD.md).
+
+---
+
+## Estado do projeto
+
+| Parte | Situação | Detalhe |
+|---|---|---|
+| Arquitetura e decisões técnicas | **Concluída** | 10 decisões registradas em [`docs/architecture.md`](docs/architecture.md) |
+| Banco de dados | **Implementado e testado** | 9 tabelas, regras de segurança e retenção impostas pelo próprio banco, validadas automaticamente a cada envio de código |
+| Relatório de Impacto à Proteção de Dados | **Rascunho concluído** | Aguarda revisão jurídica |
+| Especificação de requisitos | **v1.3 vigente, emenda para v1.4 escrita** | A emenda registra onde a implementação diverge da versão vigente |
+| Integração contínua | **Ativa** | 4 pipelines; o do banco executa testes reais, os demais aguardam o código das aplicações |
+| IA de detecção no edge (`ai_edge`) | Estruturada, a implementar | Arquivos e responsabilidades definidos |
+| API, 2ª IA e identificação (`backend`) | Estruturada, a implementar | Arquivos e responsabilidades definidos |
+| Painel do gestor (`frontend`) | Estruturado, a implementar | Arquivos e responsabilidades definidos |
+
+"Estruturada" significa que cada arquivo já existe e declara, num comentário, o que vai fazer — o contrato está escrito, a lógica ainda não.
+
+**Decisões em aberto**, que não se resolvem só com código:
+
+- **Base legal do tratamento biométrico** — depende de parecer jurídico.
+- **Imagem de terceiros** — a proposta da equipe é recortar apenas a região da pessoa monitorada, em vez de guardar o quadro inteiro.
+- **Janela de revisão antes do envio do dossiê** — um dossiê enviado à diretoria e depois revogado não desfaz o dano à reputação de quem foi identificado por engano.
+
+---
+
+## Destaques técnicos
+
+O que já está implementado e verificável neste repositório:
+
+- **Segurança imposta pelo banco, não só pela aplicação.** A regra "quem vê evidência precisa de autenticação multifator" é garantida por três gatilhos no PostgreSQL, um para cada caminho pelo qual ela poderia ser contornada: alterar o usuário, o vínculo entre usuário e papel, ou o próprio papel. Fechar só dois deles deixaria a regra aberta pelo terceiro — o que de fato acontecia, e foi corrigido ([ADR-005](docs/architecture.md)).
+- **Trilha de auditoria imutável.** A tabela `audit_logs` só aceita inserção. `UPDATE` e `DELETE` são bloqueados por gatilho e também por revogação de privilégio, em defesa em profundidade. Os registros apontam para seus alvos sem chave estrangeira, para sobreviver ao expurgo das evidências.
+- **Retenção limitada por restrição no banco.** Uma evidência não pode ser gravada com prazo acima de 180 dias; quem tentar recebe erro, não um aviso.
+- **Minimização de dados no modelo.** Quando faltam vários EPIs no mesmo instante, gera-se um evento por EPI, mas uma única imagem, compartilhada entre eles (relação 1:N).
+- **Decisão automatizada rastreável.** Cada identificação registra se veio de uma pessoa ou da IA, e uma restrição garante coerência: identificação humana exige autor; identificação por IA exige autor nulo.
+- **Testes que provam o que o sistema recusa.** A carga de demonstração tenta cinco operações proibidas. A integração contínua quebra o build se alguma for aceita — ou se menos de cinco bloqueios responderem, o que denunciaria uma proteção removida por engano.
+- **Decisões documentadas, inclusive as abandonadas.** Cada escolha estrutural tem um registro de contexto, decisão e consequência. A ADR-003, superada quando a identificação passou a ser automática, foi mantida como histórico em vez de apagada.
+
+---
+
+## Arquitetura
+
+O sistema é **web e desacoplado** em três aplicações, com um **pipeline de IA em cascata**: um filtro rápido e barato junto às câmeras, e a análise pesada — confirmação e reconhecimento facial — concentrada num único servidor.
+
+```mermaid
+flowchart TB
+    CAM["Câmeras no hospital<br/>RTSP / ONVIF"] --> D
+
+    subgraph EDGE["ai_edge — computador junto às câmeras"]
+        D["1ª IA<br/>detecção de EPI"] --> T["Rastreamento<br/>Track ID temporário"] --> R["Regra temporal<br/>T_remocao"]
+    end
+
+    R -->|"só a suspeita: imagem + metadados, REST sobre TLS"| API
+
+    subgraph BACK["backend — servidor"]
+        API["API Flask"] --> V["2ª IA<br/>confirmação"] --> F["Face match<br/>cadastro do hospital"] --> P["Dossiê PDF"]
+    end
+
+    API <--> DB[("PostgreSQL")]
+    API -->|"alerta em tempo real"| WEB["frontend<br/>painel do gestor"]
+    WEB -->|"revisão e contestação"| API
+    P --> DIR["Diretoria"]
 ```
 
+**Por que duas IAs em vez de uma.** Analisar vídeo contínuo com um modelo pesado exigiria hardware caro em cada ponto de câmera, ou enviar todo o vídeo pela rede. O filtro no edge descarta a imensa maioria dos quadros ali mesmo, e só as suspeitas seguem para o servidor. Isso reduz custo e latência, e tem um efeito de privacidade: o reconhecimento facial acontece num único lugar, mais fácil de proteger e de auditar do que dezenas de computadores espalhados pelo hospital.
+
+**Por que web, e não um programa instalado.** Implantação simples no hospital, alertas em tempo real nativos no navegador e fronteiras claras entre as partes, o que também organiza o trabalho da equipe. A decisão completa está na [ADR-009](docs/architecture.md).
+
+### Modelo de dados
+
+PostgreSQL 14 ou superior, schema técnico `vigilis`.
+
+| Tabela | O que guarda |
+|---|---|
+| `zones` | Áreas de risco, os EPIs obrigatórios de cada uma e o tempo de tolerância `T_remocao` |
+| `events` | Cada infração detectada, do tipo A ou B |
+| `visual_evidence` | A referência à imagem da infração, armazenada cifrada; uma imagem serve a vários eventos do mesmo instante |
+| `identifications` | Quem foi identificado, por quem (pessoa ou IA) e se a identificação foi contestada |
+| `incident_dossiers` | O dossiê PDF de cada incidente, com ciclo pendente → consolidado |
+| `users`, `roles`, `user_roles` | Usuários, perfis de acesso e o vínculo entre eles |
+| `audit_logs` | A trilha imutável de acessos e ações |
+
+O script de criação, com o dicionário de dados completo, está em [`database/schema.sql`](database/schema.sql).
+
+### Tecnologias
+
+| Camada | Tecnologias | Situação |
+|---|---|---|
+| Banco de dados | PostgreSQL 14+, PL/pgSQL | Em uso |
+| Infraestrutura | Docker, Docker Compose, GitHub Actions | Em uso |
+| IA no edge | Python, Ultralytics YOLOv8, OpenCV, ByteTrack/DeepSORT | Planejada |
+| Backend | Python, Flask, SQLAlchemy, Alembic, Flask-SocketIO, Flask-JWT-Extended, pyotp, ReportLab | Planejada |
+| Frontend | React, Vite, TypeScript, Tailwind CSS | Planejada |
+
 ---
 
-## Banco de dados (resumo)
+## Como executar
 
-Schema técnico **`vigilis`** (PostgreSQL 14+). Tabelas principais:
+Hoje a parte executável é o banco de dados. O procedimento abaixo cria o banco, aplica as regras de segurança e roda a carga de demonstração, que tenta cinco operações proibidas e mostra o banco recusando cada uma.
 
-| Tabela                           | Papel                                                                        |
-| -------------------------------- | ---------------------------------------------------------------------------- |
-| `zones`                          | Áreas de risco, EPIs obrigatórios e `T_remocao` (tempo tolerado de remoção) por área. |
-| `events`                         | Alertas de infração (Tipo A/B); recebe nome/matrícula resolvidos pela IA.    |
-| `visual_evidence`                | Referência ao *snapshot* (imagem capturada) nítido e cifrado — **1 evidência : N eventos** (RF-16, Requisito Funcional 16). |
-| `identifications`                | Identificação resolvida — **contestável/revisável** (RF-17, art. 20).        |
-| `incident_dossiers`              | Dossiê PDF do incidente — ciclo **PENDENTE → CONSOLIDADO**.                  |
-| `users` / `roles` / `user_roles` | RBAC (Controle de Acesso Baseado em Papéis) e MFA (Autenticação Multifator), conforme RNF-19 (Requisito Não Funcional 19). |
-| `audit_logs`                     | Trilha **imutável**, *append-only* — só aceita inserção, nunca alteração ou remoção (RNF-14). |
+**Pré-requisito:** apenas o [Docker](https://docs.docker.com/get-docker/) (no Windows, o Docker Desktop).
 
-> **Origem da identificação (ADR-010) — já aplicada.** Como a identificação passou a ser automática, `identifications` ganhou a coluna `source` (`HUMAN` ou `AI`), `identified_by` virou opcional e a constraint `chk_identification_source` garante a coerência entre os dois: origem humana exige autor, origem IA exige autor nulo. Feito na migração [`2026-06-18_identification-source.sql`](migrations/2026-06-18_identification-source.sql). O trigger de consolidação do dossiê **não precisou mudar** — ele valida apenas que `events.audited_professional_*` estão preenchidos, independentemente de quem preencheu.
-
-DDL e dicionário em [`database/schema.sql`](database/schema.sql); evolução do banco em [`migrations/`](migrations/README.md); decisões em [`docs/architecture.md`](docs/architecture.md).
-
----
-
-## Como rodar (desenvolvimento)
-
-O banco é a única parte que já roda de ponta a ponta. Backend, frontend e edge sobem, mas ainda não fazem nada — o código é esqueleto.
+**1. Clonar e subir o banco**
 
 ```bash
-# 1. Variáveis de ambiente
-cp .env.example .env        # Windows: copy .env.example .env
-
-# 2. Banco de dados via Docker
+git clone https://github.com/KlippellPedro/BioShield-AI.git
+cd BioShield-AI
+cp .env.example .env
 docker compose up -d db
-
-# 3. Schema + migrações + seed
-#    Atenção: o schema.sql é um documento Markdown com o DDL dentro de um bloco ```sql.
-#    Não passe direto ao psql — extraia o bloco (é o que o script faz).
-bash scripts/apply_schema.sh
-psql -U postgres -d bioshield -f migrations/2026-06-18_fix-mfa-bypass.sql
-psql -U postgres -d bioshield -f migrations/2026-06-18_identification-source.sql
-psql -U postgres -d bioshield -f database/seed.sql        # opcional, só em dev
 ```
 
-O `seed.sql` serve como teste de aceitação do banco: ele exercita o fluxo 1:N de evidência, o ciclo do dossiê e três bloqueios que **devem** falhar (consolidar dossiê sem identificação, dar acesso à evidência a usuário sem MFA, retenção acima de 180 dias). Se algum deles passar, a proteção correspondente não está no lugar.
+**2. Criar o schema e carregar a demonstração**
 
-### Guias por pasta
+Linux, macOS ou WSL:
 
-| Pasta | Guia |
+```bash
+docker run --rm --network bioshield-ai_default -v "$PWD:/repo" -w /repo \
+  -e PGHOST=db -e PGUSER=postgres -e PGPASSWORD=postgres -e PGDATABASE=bioshield \
+  postgres:16 bash scripts/apply_schema.sh --with-seed
+```
+
+Windows, no PowerShell:
+
+```powershell
+docker run --rm --network bioshield-ai_default -v "${PWD}:/repo" -w /repo `
+  -e PGHOST=db -e PGUSER=postgres -e PGPASSWORD=postgres -e PGDATABASE=bioshield `
+  postgres:16 bash scripts/apply_schema.sh --with-seed
+```
+
+O comando roda o cliente do PostgreSQL dentro de um container, na mesma rede do banco. Assim não é preciso instalar nada além do Docker, e não há conflito com um PostgreSQL que já esteja instalado na máquina usando a porta 5432.
+
+**3. O que você deve ver**
+
+A saída termina com cinco confirmações `OK (esperado)`, uma por proteção:
+
+| Operação tentada | Proteção que recusa |
 |---|---|
-| `ai_edge/` | [Filtro de EPI no edge (1ª IA)](ai_edge/README.md) |
-| `backend/` | [API, 2ª IA, face match e segurança](backend/README.md) |
-| `frontend/` | [Dashboard do gestor](frontend/README.md) |
-| `database/` | [Schema, seed e Alembic](database/README.md) |
-| `migrations/` | [Migrações SQL manuais](migrations/README.md) |
-| `config/` | [Configuração de serviço](config/README.md) |
-| `scripts/` | [Utilitários de dev/ops](scripts/README.md) |
-| `docs/` | [ADRs e documentação de entrega](docs/README.md) |
-| `.github/` | [Integração contínua](.github/README.md) |
+| Consolidar um dossiê sem o profissional identificado | Gatilho de consolidação do dossiê |
+| Dar acesso às evidências a um usuário sem autenticação multifator | Gatilho de MFA no vínculo usuário–papel |
+| Guardar uma evidência por mais de 180 dias | Restrição de retenção máxima |
+| Liberar evidências para um perfil que tem membros sem autenticação multifator | Gatilho de MFA no papel |
+| Registrar uma identificação feita pela IA como se tivesse autor humano | Restrição de origem da identificação |
+
+Se aparecer `FALHA DO TESTE`, alguma proteção deixou passar o que deveria barrar.
+
+**4. Encerrar**
+
+```bash
+docker compose down -v
+```
+
+O `-v` apaga também o volume do banco. Sem ele, os dados permanecem para a próxima execução.
+
+> Já tem o cliente `psql` instalado? Com o banco no ar, basta `bash scripts/apply_schema.sh --with-seed`, configurando `PGHOST`, `PGUSER`, `PGPASSWORD` e `PGDATABASE`. Outras opções do script estão em [`scripts/README.md`](scripts/README.md).
 
 ---
 
-## Conformidade e qualidade — estado
+## Documentação
 
-As cinco dívidas levantadas na revisão de 2026-09-09 foram tratadas:
+| Documento | Para que serve |
+|---|---|
+| [Decisões de arquitetura (ADRs)](docs/architecture.md) | Por que o sistema tem a forma que tem — dez decisões, com contexto e consequências |
+| [Relatório de Impacto à Proteção de Dados](docs/DPIA_RIPD.md) | Análise de riscos à privacidade, base legal e direitos dos profissionais monitorados |
+| [Emenda ao SRS para a v1.4](docs/SRS_v1.4_emenda.md) | O que muda na especificação de requisitos com a identificação automatizada |
+| [Banco de dados](database/README.md) · [Migrações](migrations/README.md) | Schema, carga de demonstração e histórico de mudanças do banco |
+| [IA no edge](ai_edge/README.md) · [Backend](backend/README.md) · [Frontend](frontend/README.md) | O contrato de cada aplicação: o que cada arquivo fará |
+| [Scripts](scripts/README.md) · [Configuração](config/README.md) · [Integração contínua](.github/README.md) | Ferramentas de apoio ao desenvolvimento |
 
-| Item | Situação | Onde |
+<details>
+<summary><strong>Estrutura completa do repositório</strong></summary>
+
+```
+BioShield-AI/
+│
+├── ai_edge/                      # 1ª IA no edge: detecção de EPI, rastreamento e regra temporal
+│   ├── src/
+│   │   ├── main.py               # Loop principal: captura → detecção → rastreamento → regras → envio
+│   │   ├── config.py             # Parâmetros (FPS, limiares, T_remocao) lidos do .env
+│   │   ├── capture/              # Câmera (webcam/RTSP/ONVIF) e desfoque do feed normal
+│   │   ├── detection/            # Detector YOLO e mapa de classes de EPI
+│   │   ├── tracking/             # Rastreamento com Track ID temporário; Re-ID por silhueta
+│   │   ├── rules/                # Associação EPI ↔ pessoa e máquina de estados do T_remocao
+│   │   ├── evidence/             # Captura da imagem nítida no instante da suspeita
+│   │   └── api_client/           # Envio da suspeita ao backend (REST sobre TLS)
+│   ├── models/                   # Pesos do modelo (Git LFS/DVC, fora do git comum)
+│   ├── tests/                    # Testes da regra temporal
+│   └── Dockerfile · requirements.txt · README.md
+│
+├── backend/                      # API, 2ª IA, face match, dossiê e segurança
+│   ├── app/
+│   │   ├── models/               # Mapeamento das tabelas (SQLAlchemy)
+│   │   ├── api/                  # Rotas REST: auth, event, evidence, identification, dossier, zone, report
+│   │   ├── services/             # Validação de EPI, face match, cadastro hospitalar, PDF, auditoria, retenção
+│   │   ├── sockets/              # Alertas em tempo real
+│   │   ├── schemas/ · utils/     # Validação de payloads; criptografia e decoradores de acesso
+│   │   └── __init__.py · extensions.py · config.py
+│   ├── models/                   # Pesos da 2ª IA e do face match (Git LFS/DVC)
+│   ├── jobs/purge_evidence.py    # Expurgo por retenção
+│   ├── tests/                    # MFA e regras do dossiê
+│   └── wsgi.py · Dockerfile · requirements.txt · README.md
+│
+├── frontend/                     # Painel do gestor: alertas, zonas, revisão, evidências e dossiês
+│   ├── src/                      # pages/, components/, hooks/, api/, store/, styles/
+│   ├── public/
+│   └── index.html · package.json · vite.config.ts · tsconfig.json · Dockerfile · README.md
+│
+├── database/                     # Implementado
+│   ├── schema.sql                # Criação do banco (v1.4) e dicionário de dados
+│   ├── seed.sql                  # Carga de demonstração e testes de aceitação
+│   ├── migrations/               # Esqueleto do Alembic, para quando o backend gerar migrações
+│   └── README.md
+│
+├── migrations/                   # Migrações SQL aplicadas, em ordem cronológica
+│   ├── 2026-06-18_fix-mfa-bypass.sql
+│   ├── 2026-06-18_identification-source.sql
+│   ├── 2026-09-09_fix-role-privilege-escalation.sql
+│   └── README.md
+│
+├── docs/                         # ADRs, Relatório de Impacto e emenda do SRS
+├── scripts/                      # apply_schema.sh (implementado), reset_db.sh, run_dev.sh
+├── config/                       # Gunicorn, logging e parâmetros de conexão
+├── .github/workflows/            # Integração contínua: database, backend, frontend e edge
+│
+└── docker-compose.yml · .env.example · .gitignore · .dockerignore · Makefile · README.md
+```
+
+</details>
+
+---
+
+## Equipe
+
+| Integrante | Frente | Responsabilidade |
 |---|---|---|
-| Divergência entre o SRS v1.3 e a ADR-010 | **Documentada.** Delta formal escrito, requisito a requisito; falta republicar o PDF oficial | [`docs/SRS_v1.4_emenda.md`](docs/SRS_v1.4_emenda.md) |
-| Relatório de Impacto (DPIA/RIPD) | **Escrito.** Rascunho de engenharia com 9 riscos mapeados; depende de revisão jurídica | [`docs/DPIA_RIPD.md`](docs/DPIA_RIPD.md) |
-| Cabeçalho do `schema.sql` desatualizado | **Corrigido.** Declara v1.4, lista migrações incorporadas, sem referência pendurada | [`database/schema.sql`](database/schema.sql) |
-| Brecha-irmã do MFA (ADR-005) | **Fechada e testada.** Terceiro trigger; a invariante do RNF-19 agora é completa | [`migrations/2026-09-09_...sql`](migrations/2026-09-09_fix-role-privilege-escalation.sql) |
-| CI inexistente, `ai_edge/` sem cobertura | **Quatro workflows escritos**, incluindo o de banco que valida as proteções | [`.github/README.md`](.github/README.md) |
+| **Pedro Nadalon Klippel** | Backend, segurança e banco de dados | API Flask, 2ª IA, reconhecimento facial e integração com o cadastro do hospital; autenticação, persistência, criptografia e expurgo conforme a LGPD |
+| **Vinicius Ferrari Niffa** | Engenharia de IA e edge | 1ª IA de detecção de EPI, lógica temporal do `T_remocao` e captura e envio da imagem da infração |
+| **Carlos Eduardo Cavalcante da Rocha** | Frontend web e interface | Painel em tempo real, revisão e contestação da identificação automática e visualização dos dossiês |
 
-### O que ficou aberto, e por quê
-
-Nem tudo se resolve escrevendo código — três itens dependem de decisão que não é técnica:
-
-- **Base legal do tratamento biométrico.** Precisa de parecer jurídico. O legítimo interesse não serve para dado sensível, e o consentimento é frágil na relação de emprego. Sem isso definido, o sistema só deve operar com dado sintético. Ver [DPIA §4.3](docs/DPIA_RIPD.md).
-- **Terceiros no enquadramento (risco R7).** O snapshot de uma infração em UTI provavelmente contém o paciente, cuja imagem em leito é dado de saúde — e ele nem é destinatário do sistema. A recomendação da equipe é recortar a região do track sob suspeita em vez de guardar o quadro inteiro. Decisão de produto pendente.
-- **Janela de revisão antes do despacho.** Um dossiê já enviado à diretoria e depois revogado não desfaz o dano reputacional. Reter o despacho automático por um intervalo de revisão tornaria o art. 20 efetivo em vez de formal. Decisão de produto pendente.
-
-A dívida de **implementação** continua sendo a maior: backend, frontend e edge são esqueleto. A prioridade de conformidade dentro dela é a tela de revisão e contestação, porque é ela que dá efetividade à salvaguarda do art. 20.
+**Orientação:** Prof. Miguel Matiolla
+**Instituição:** Senac-RS — Curso Técnico em Desenvolvimento de Sistemas, Campanha Senac & Sesc Saúde
 
 ---
 
 ## Glossário de siglas
 
-O projeto cruza quatro vocabulários — engenharia de software, proteção de dados, visão computacional e ambiente hospitalar. Esta é a referência única; cada README de pasta também expande, no seu texto, as siglas que usa.
+O projeto cruza quatro vocabulários — engenharia de software, proteção de dados, visão computacional e ambiente hospitalar. Esta é a referência única; cada README de pasta também expande, no seu texto, as siglas que usa. Clique em um grupo para abri-lo.
 
-### Documentação e requisitos
+<details>
+<summary><strong>Documentação e requisitos</strong></summary>
 
 | Sigla | Significado | No projeto |
 |---|---|---|
@@ -231,7 +323,10 @@ O projeto cruza quatro vocabulários — engenharia de software, proteção de d
 | **IEEE 830** | Norma do *Institute of Electrical and Electronics Engineers* para especificação de requisitos | Formato seguido pelo SRS. |
 | **ISO/IEC 25010** | Norma internacional de qualidade de produto de software | Modelo de qualidade adotado. |
 
-### Proteção de dados
+</details>
+
+<details>
+<summary><strong>Proteção de dados</strong></summary>
 
 | Sigla | Significado | No projeto |
 |---|---|---|
@@ -241,7 +336,10 @@ O projeto cruza quatro vocabulários — engenharia de software, proteção de d
 | **DPO** | *Data Protection Officer* — Encarregado de Dados | Quem responde pelo tratamento perante a ANPD e os titulares. Existe como papel no controle de acesso do sistema. |
 | **ANPD** | Autoridade Nacional de Proteção de Dados | Órgão fiscalizador da LGPD. |
 
-### Segurança
+</details>
+
+<details>
+<summary><strong>Segurança</strong></summary>
 
 | Sigla | Significado | No projeto |
 |---|---|---|
@@ -252,7 +350,10 @@ O projeto cruza quatro vocabulários — engenharia de software, proteção de d
 | **TLS** | *Transport Layer Security* — Segurança da Camada de Transporte | Criptografia em trânsito. Obrigatória no envio da imagem do edge ao backend. |
 | **TOTP** | *Time-based One-Time Password* — Senha de Uso Único Baseada em Tempo | Mecanismo do segundo fator (biblioteca `pyotp`). |
 
-### Inteligência artificial e visão computacional
+</details>
+
+<details>
+<summary><strong>Inteligência artificial e visão computacional</strong></summary>
 
 | Sigla | Significado | No projeto |
 |---|---|---|
@@ -266,7 +367,10 @@ O projeto cruza quatro vocabulários — engenharia de software, proteção de d
 | **Face match** | Comparação facial | Confronto da imagem da infração com o cadastro do hospital para resolver nome e matrícula. |
 | **Track ID** | Identificador de rastreamento | Número temporário dado a cada pessoa em cena. Vive só em memória e não identifica ninguém. |
 
-### Arquitetura, rede e infraestrutura
+</details>
+
+<details>
+<summary><strong>Arquitetura, rede e infraestrutura</strong></summary>
 
 | Sigla | Significado | No projeto |
 |---|---|---|
@@ -284,7 +388,10 @@ O projeto cruza quatro vocabulários — engenharia de software, proteção de d
 | **edge** | Borda | O computador instalado junto às câmeras, onde roda a 1ª IA. Processar ali evita trafegar vídeo contínuo pela rede. |
 | **headless** | Sem interface gráfica | Programa que roda sem tela, só por linha de comando. É o caso do `ai_edge`. |
 
-### Banco de dados
+</details>
+
+<details>
+<summary><strong>Banco de dados</strong></summary>
 
 | Sigla | Significado | No projeto |
 |---|---|---|
@@ -298,7 +405,10 @@ O projeto cruza quatro vocabulários — engenharia de software, proteção de d
 | **ORM** | *Object-Relational Mapping* — Mapeamento Objeto-Relacional | Camada que traduz tabelas em objetos Python (SQLAlchemy). |
 | **trigger** | Gatilho | Rotina que o banco dispara sozinho antes ou depois de uma operação. É como as regras de MFA e retenção são impostas. |
 
-### Domínio hospitalar
+</details>
+
+<details>
+<summary><strong>Domínio hospitalar</strong></summary>
 
 | Sigla | Significado | No projeto |
 |---|---|---|
@@ -306,8 +416,14 @@ O projeto cruza quatro vocabulários — engenharia de software, proteção de d
 | **UTI** | Unidade de Terapia Intensiva | Uma das categorias de zona de risco. |
 | **CCIH** | Comissão de Controle de Infecção Hospitalar | Setor responsável pela conformidade; corresponde a um papel de acesso no sistema. |
 | **CRM** | Conselho Regional de Medicina | Registro profissional que aparece na identificação de médicos. |
+| **IRAS** | Infecções Relacionadas à Assistência à Saúde | Infecções adquiridas em consequência do cuidado recebido no serviço de saúde. É o problema que o uso correto de EPI ajuda a prevenir. |
+| **NR-32** | Norma Regulamentadora nº 32 | Norma de segurança e saúde no trabalho em serviços de saúde, que inclui o uso de EPI. |
+| **Oclusão** | Obstrução visual momentânea | Quando algo passa na frente do EPI na imagem (uma mão, outra pessoa). O `T_remocao` existe para não confundir oclusão com remoção. |
 
-### Ferramentas e ambiente
+</details>
+
+<details>
+<summary><strong>Ferramentas e ambiente</strong></summary>
 
 | Sigla | Significado | No projeto |
 |---|---|---|
@@ -315,20 +431,12 @@ O projeto cruza quatro vocabulários — engenharia de software, proteção de d
 | **DVC** | *Data Version Control* — Controle de Versão de Dados | Alternativa ao Git LFS para versionar modelos e conjuntos de dados. |
 | **WSL** | *Windows Subsystem for Linux* — Subsistema Windows para Linux | Permite rodar os scripts `.sh` no Windows, que é o ambiente do time. |
 
----
-
-## Equipe
-
-Projeto desenvolvido na **Campanha Senac & Sesc Saúde** — Curso Técnico em Desenvolvimento de Sistemas (Senac-RS).
-
-| Membro                     | Frente                    | Missão                                                                                              |
-| -------------------------- | ------------------------- | --------------------------------------------------------------------------------------------------- |
-| **Pedro Nadalon Klippel**  | Backend / Segurança / DB  | API Flask, 2ª IA + face match + integração hospitalar, JWT (pyjwt), persistência, cifra e expurgo LGPD. |
-| **Vinicius Ferrari Niffa** | Engenharia de IA / Edge   | 1ª IA (filtro YOLO), lógica do `T_remocao` e captura/envio do snapshot da infração.                 |
-| **Carlos Eduardo Cavalcante da Rocha** | Frontend Web / UI | Dashboard em tempo real, revisão/contestação da identificação automática e visualizador de dossiês. |
-
-**Orientação:** Prof. Miguel Matiolla
+</details>
 
 ---
 
-> **Documento e código de caráter acadêmico/confidencial.** Trata **dado pessoal e biométrico sensível** sob a LGPD — não exponha evidências, *templates* faciais, segredos de MFA ou chaves de criptografia no repositório (apenas **referências** ao cofre/KMS).
+## Uso e dados
+
+Projeto acadêmico, mantido público para avaliação e portfólio. Ainda não há licença de uso definida.
+
+O repositório não contém, e não deve conter, dados reais: nada de imagens de evidência, *templates* faciais, segredos de autenticação ou chaves de criptografia — apenas referências a um cofre externo. Os nomes presentes na carga de demonstração são fictícios. O sistema não deve ser usado com pessoas reais antes da definição da base legal e da revisão do Relatório de Impacto pelo Encarregado de Dados da instituição.
