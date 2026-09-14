@@ -83,7 +83,8 @@ jobs:
         run: |
           bash scripts/apply_schema.sh --migrations-only > /dev/null
           psql -v ON_ERROR_STOP=1 -f database/seed.sql > /dev/null
-          total=$(psql -tAc "SET search_path TO vigilis; SELECT count(*) FROM identifications;")
+          # -q e nome qualificado: com "SET ...; SELECT ..." o psql imprime "SET" antes do número.
+          total=$(psql -qtAc "SELECT count(*) FROM vigilis.identifications;")
           if [ "$total" != "2" ]; then
             echo "::error::Após reexecutar o seed, identifications tem $total linhas (esperado 2). O seed deixou de ser idempotente."
             exit 1
