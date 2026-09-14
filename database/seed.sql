@@ -13,6 +13,7 @@
 --   • BLOQUEIO 4: promover papel a can_view_evidence com membro sem MFA.
 --   • BLOQUEIO 5: identificação AI com autor humano preenchido (incoerente).
 --   • BLOQUEIO 6: esvaziar a trilha de auditoria com TRUNCATE.
+--   • BLOQUEIO 7: desligar o MFA de quem tem papel com acesso à evidência.
 --   • Default de retenção (90 dias) preenchido por trigger.
 --
 -- Idempotente: a seção 0 limpa os dados TRANSACIONAIS desta demo (dossiês,
@@ -261,6 +262,23 @@ BEGIN
         RAISE WARNING 'FALHA DO TESTE: TRUNCATE esvaziou a trilha de auditoria.';
     EXCEPTION WHEN others THEN
         RAISE NOTICE 'OK (esperado) — TRUNCATE da trilha de auditoria bloqueado: %', SQLERRM;
+    END;
+END $$;
+
+-- ---------------------------------------------------------------------
+-- BLOQUEIO 7 — desligar o MFA de quem tem papel com acesso à evidência (RNF-19).
+-- A Ana tem MFA e o papel ENFERMAGEM_CHEFE (can_view_evidence = TRUE). Sem o
+-- trigger prevent_mfa_disable_with_evidence_role, bastaria desligar o segundo
+-- fator depois de receber o papel para continuar vendo evidências sem ele.
+-- ---------------------------------------------------------------------
+DO $$
+BEGIN
+    BEGIN
+        UPDATE users SET mfa_enabled = FALSE
+         WHERE user_id = 'a0000000-0000-0000-0000-000000000001';
+        RAISE WARNING 'FALHA DO TESTE: MFA desligado para usuário com acesso à evidência.';
+    EXCEPTION WHEN others THEN
+        RAISE NOTICE 'OK (esperado) — desligar o MFA de quem vê evidência bloqueado: %', SQLERRM;
     END;
 END $$;
 
