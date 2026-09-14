@@ -2,7 +2,7 @@
 # de pé. É a CI mais importante do projeto hoje: o banco é a única frente
 # implementada, e é nele que moram as garantias de LGPD e RNF-19.
 #
-# O seed.sql funciona como teste de aceitação — ele tenta cinco operações que
+# O seed.sql funciona como teste de aceitação — ele tenta sete operações que
 # DEVEM ser rejeitadas e imprime "FALHA DO TESTE" se alguma delas passar. Este
 # workflow quebra o build nesse caso.
 name: database-ci
@@ -62,13 +62,15 @@ jobs:
             grep "FALHA DO TESTE" seed_output.txt
             exit 1
           fi
-          # As cinco guardas precisam ter se manifestado; ausência de saída também é falha.
+          # As sete guardas precisam ter se manifestado; ausência de saída também é falha.
+          # Ao adicionar um bloqueio ao seed.sql, atualize ESPERADOS.
+          ESPERADOS=7
           esperados=$(grep -c "OK (esperado)" seed_output.txt || true)
-          if [ "$esperados" -lt 5 ]; then
-            echo "::error::Esperava 5 bloqueios confirmados, encontrei $esperados. Alguma guarda sumiu do schema?"
+          if [ "$esperados" -lt "$ESPERADOS" ]; then
+            echo "::error::Esperava $ESPERADOS bloqueios confirmados, encontrei $esperados. Alguma guarda sumiu do schema?"
             exit 1
           fi
-          echo "As 5 proteções responderam como esperado."
+          echo "As $ESPERADOS proteções responderam como esperado."
 
       # O baseline é create-once (CREATE TYPE/TABLE sem guarda) e não é reaplicável
       # de propósito. As migrações, sim: são o caminho de upgrade de um banco que
