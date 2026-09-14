@@ -10,7 +10,7 @@
 | **Convenções** | `snake_case`, chaves substitutas UUID (exceto `audit_logs`, ver §3) |
 | **Versão SRS** | v1.4 (evidência 1:N, MFA, retenção limitada, **identificação automatizada** por face match — ADR-010) |
 | **Rastreabilidade SRS** | RF-04/05/13/14/16/17, RNF-05/12/13/14/18/19, §6 (LGPD) |
-| **Migrações incorporadas** | `2026-06-18_identification-source.sql` · `2026-06-18_fix-mfa-bypass.sql` · `2026-09-09_fix-role-privilege-escalation.sql` |
+| **Migrações incorporadas** | `2026-06-18_identification-source.sql` · `2026-06-18_fix-mfa-bypass.sql` · `2026-09-09_fix-role-privilege-escalation.sql` · `2026-09-14_fix-audit-truncate.sql` |
 
 > **Este arquivo é o estado ATUAL do banco, não um marco histórico.** Ele já incorpora todas as
 > migrações listadas acima — um banco criado a partir daqui nasce completo, e reaplicar as
@@ -24,7 +24,7 @@
 ## 1. Notas de Arquitetura de Dados
 
 - **Chaves primárias:** UUID (`gen_random_uuid()`) nas entidades de negócio — evita enumeração sequencial e facilita geração distribuída no *edge*. Exceção: `audit_logs` usa `IDENTITY` (BIGINT) por ser *append-only* sequencial de alto volume.
-- **Imutabilidade do `audit_logs`:** garantida por *triggers* que bloqueiam `UPDATE`/`DELETE` **e** por `REVOKE` de privilégios (defesa em profundidade).
+- **Imutabilidade do `audit_logs`:** garantida por *triggers* que recusam `UPDATE` e `DELETE` (de linha) e `TRUNCATE` (de instrução — triggers de linha não disparam com `TRUNCATE`). A segunda camada, por `REVOKE` de privilégios, está preparada como comentário até existir o papel de banco da aplicação. Um superusuário ainda pode desabilitar triggers; isso cabe à gestão de acesso ao servidor.
 - **Sobrevivência da auditoria ao expurgo:** os alvos da auditoria são referências lógicas (sem FK), para que o expurgo de evidência (retenção LGPD) **não** apague o registro de quem a acessou.
 - **Latência ≤ 3 s:** sustentada por índices voltados às consultas do console em tempo real (eventos pendentes por zona/janela temporal) e à trilha de auditoria.
 - **MFA e acesso à evidência (RNF-19):** o banco garante a invariante *"todo usuário vinculado a papel com `can_view_evidence` tem MFA habilitado"* por **três** triggers, um para cada caminho de mudança — o vínculo (`require_mfa_evidence_role`), o usuário (`prevent_mfa_disable_with_evidence_role`) e o papel (`prevent_evidence_grant_without_mfa`). Fechar só um ou dois deles deixa a regra contornável, porque o atacante escolhe por onde entrar. A validação principal continua no login, na aplicação; isto é a rede de segurança.
@@ -434,7 +434,7 @@ COMMENT ON TABLE audit_logs IS 'Trilha append-only e imutável (RNF-14). Alvos s
 CREATE OR REPLACE FUNCTION trg_block_audit_mutation()
 RETURNS TRIGGER AS $$
 BEGIN
-    RAISE EXCEPTION 'audit_logs é imutável: UPDATE/DELETE proibidos.';
+    RAISE EXCEPTION 'audit_logs é imutável: % proibido (RNF-14).', TG_OP;
 END;
 $$ LANGUAGE plpgsql;
 
@@ -445,6 +445,13 @@ CREATE TRIGGER block_audit_update
 CREATE TRIGGER block_audit_delete
     BEFORE DELETE ON audit_logs
     FOR EACH ROW EXECUTE FUNCTION trg_block_audit_mutation();
+
+-- TRUNCATE não visita linhas, então os triggers FOR EACH ROW acima não o
+-- alcançam. Trigger de instrução, disparado uma vez por comando
+-- (migração 2026-09-14_fix-audit-truncate).
+CREATE TRIGGER block_audit_truncate
+    BEFORE TRUNCATE ON audit_logs
+    FOR EACH STATEMENT EXECUTE FUNCTION trg_block_audit_mutation();
 
 -- Imutabilidade por privilégios (camada 2 — defesa em profundidade)
 -- Ajuste 'vigilis_app' ao papel real da aplicação:

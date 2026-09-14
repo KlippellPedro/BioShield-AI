@@ -12,6 +12,7 @@
 --   • BLOQUEIO 3: retenção de evidência acima do teto de 180 dias.
 --   • BLOQUEIO 4: promover papel a can_view_evidence com membro sem MFA.
 --   • BLOQUEIO 5: identificação AI com autor humano preenchido (incoerente).
+--   • BLOQUEIO 6: esvaziar a trilha de auditoria com TRUNCATE.
 --   • Default de retenção (90 dias) preenchido por trigger.
 --
 -- Idempotente: a seção 0 limpa os dados TRANSACIONAIS desta demo (dossiês,
@@ -245,6 +246,21 @@ BEGIN
         RAISE WARNING 'FALHA DO TESTE: aceitou identificação AI com autor humano.';
     EXCEPTION WHEN others THEN
         RAISE NOTICE 'OK (esperado) — identificação AI com autor humano rejeitada: %', SQLERRM;
+    END;
+END $$;
+
+-- ---------------------------------------------------------------------
+-- BLOQUEIO 6 — esvaziar a trilha de auditoria com TRUNCATE (RNF-14).
+-- Triggers de linha não disparam com TRUNCATE; sem o trigger de instrução
+-- block_audit_truncate, este comando apagaria a trilha inteira sem erro.
+-- ---------------------------------------------------------------------
+DO $$
+BEGIN
+    BEGIN
+        TRUNCATE audit_logs;
+        RAISE WARNING 'FALHA DO TESTE: TRUNCATE esvaziou a trilha de auditoria.';
+    EXCEPTION WHEN others THEN
+        RAISE NOTICE 'OK (esperado) — TRUNCATE da trilha de auditoria bloqueado: %', SQLERRM;
     END;
 END $$;
 
