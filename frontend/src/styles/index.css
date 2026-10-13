@@ -1,1 +1,113 @@
-/* Tailwind + estilos base */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background-color: #060e20;
+  background-image: 
+    radial-gradient(circle at 50% 0%, rgba(0, 153, 255, 0.12) 0%, transparent 55%),
+    radial-gradient(circle at 100% 100%, rgba(0, 102, 255, 0.08) 0%, transparent 50%),
+    linear-gradient(rgba(255, 255, 255, 0.015) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.015) 1px, transparent 1px);
+  background-size: 100% 100%, 100% 100%, 48px 48px, 48px 48px;
+  color: #ffffff;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+/* Modern Clean Medical Card */
+.medical-card {
+  background: rgba(14, 28, 62, 0.85);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(0, 195, 255, 0.22);
+  border-radius: 1rem;
+  box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.5), 0 0 16px -2px rgba(0, 195, 255, 0.12);
+  transition: all 0.2s ease-in-out;
+}
+
+.medical-card:hover {
+  border-color: rgba(0, 210, 255, 0.45);
+  box-shadow: 0 8px 30px -4px rgba(0, 0, 0, 0.6), 0 0 24px -2px rgba(0, 195, 255, 0.22);
+}
+
+.medical-card-active {
+  background: rgba(18, 36, 80, 0.95);
+  border: 1px solid rgba(0, 220, 255, 0.6);
+  box-shadow: 0 0 25px rgba(0, 195, 255, 0.25);
+}
+
+/* High Contrast Pure White Medical Panel */
+.medical-card-white {
+  background: #ffffff;
+  color: #0f172a;
+  border-radius: 1rem;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+}
+
+/* Elegant Buttons - High Visibility */
+.btn-medical-primary {
+  background: linear-gradient(135deg, #0077ff, #00c3ff);
+  color: #ffffff;
+  font-weight: 600;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  box-shadow: 0 4px 14px rgba(0, 119, 255, 0.35);
+  transition: all 0.15s ease-in-out;
+}
+
+.btn-medical-primary:hover {
+  background: linear-gradient(135deg, #0066ee, #00d4ff);
+  box-shadow: 0 6px 20px rgba(0, 195, 255, 0.5);
+  transform: translateY(-1px);
+}
+
+.btn-medical-secondary {
+  background: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  transition: all 0.15s ease-in-out;
+}
+
+.btn-medical-secondary:hover {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.4);
+}
+
+.btn-medical-white {
+  background: #ffffff;
+  color: #0066ff;
+  font-weight: 700;
+  border: 1px solid #ffffff;
+  box-shadow: 0 4px 14px rgba(255, 255, 255, 0.2);
+  transition: all 0.15s ease;
+}
+
+.btn-medical-white:hover {
+  background: #f0f7ff;
+  color: #0055dd;
+  box-shadow: 0 6px 20px rgba(255, 255, 255, 0.35);
+}
+
+/* Custom Clean Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #060e20;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 195, 255, 0.35);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #00c3ff;
+}

@@ -39,9 +39,18 @@ Todo perfil que vê imagens exige autenticação em dois fatores. No caso do Enc
 
 ## Estado atual
 
-**Estruturado, ainda sem implementação.** Os arquivos de página e componente existem e declaram, num comentário, o que farão. O `index.html` e o `tsconfig.json` estão prontos, mas o `package.json` ainda não declara nenhuma dependência e o `vite.config.ts` é só um comentário. O `Dockerfile` também é um modelo comentado.
+**Implementado e funcional.** O front-end do BioShield AI está completamente desenvolvido com foco no design **Azul Neon Moderno** (Cyber-Medical Dark UI com paleta `#00f0ff`, contrastes de alta visibilidade para salas de monitoramento hospitalar e conformidade rigorosa com o SRS v1.4 e LGPD Art. 20).
 
-Na prática, **o painel ainda não abre**: `npm run dev` falha porque o Vite não está instalado. O primeiro passo concreto é declarar React, Vite, TypeScript, Tailwind CSS e axios no `package.json` e configurar o Vite.
+### Destaques Implementados:
+- **Design System Azul Neon:** Estética moderna com glassmorphism, bordas neon pulsantes, scanlines de radar, feedback sonoro e visual em tempo real.
+- **Console de Alertas em Tempo Real (`Dashboard.tsx`):** Exibição de infrações em menos de 3s (RNF-05), filtros dinâmicos por zona, status (`PENDENTE`, `RECONHECIDO`, `DESCARTADO`), EPI violado e tipo (`TIPO_A` ou `TIPO_B`).
+- **Simulador de Detecções de Borda:** Loop integrado que simula chegadas contínuas do modelo YOLOv8 no edge com sintetizador de áudio Web Audio API (sem dependência de arquivos externos).
+- **Gestão de Zonas de Risco (`Zones.tsx`):** Cadastro e edição de áreas hospitalares (UTI, Centro Cirúrgico, Isolamento), EPIs obrigatórios e limiar de tolerância `T_remocao` (1s a 300s).
+- **Detalhe do Evento & Revisão LGPD (`EventDetail.tsx`):** Distinção clara entre decisão automatizada da IA (`ADR-010`) e auditoria manual humana (`RF-17`), com fluxo interativo de contestação do titular (LGPD Art. 20) e revogação.
+- **Visualizador Forense de Evidência (`EvidenceViewer.tsx`):** Guarda de segurança **RNF-19** (bloqueio imediato se o usuário não possuir MFA ativo e papel autorizado), comparação entre feed desfocado e snapshot nítido, integridade SHA-256 e contagem regressiva de retenção (90 dias / máx 180).
+- **Dossiês de Incidente em PDF (`Dossiers.tsx` / `DossierModal.tsx`):** Ciclo `PENDENTE` → `CONSOLIDADO` com validação de identificação e visualização em modal do documento oficial com brasão hospitalar.
+- **Trilha Imutável de Auditoria (`AuditLogs.tsx`):** Visualização append-only dos eventos auditados (`EVIDENCE_VIEW`, `IDENTIFICATION_CREATE`, `EVENT_ACK`, etc.).
+- **Autenticação & Desafio MFA (`Login.tsx`):** Entrada com usuário/senha e segundo fator TOTP de 6 dígitos, com seletor de contas demonstrativas pré-cadastradas no seed.
 
 ---
 
@@ -96,11 +105,13 @@ Valores definidos no banco de dados, que o painel vai exibir e alterar:
 
 ## Como executar
 
-Quando as dependências forem declaradas:
+Com o Node.js instalado, a partir da pasta `frontend/`:
 
 ```bash
+cd frontend
 npm install
-npm run dev      # sobe o servidor de desenvolvimento do Vite
+npm run dev      # sobe o servidor de desenvolvimento do Vite em http://localhost:3000
 ```
 
-Hoje o `npm run dev` ainda falha, pelos motivos descritos em [Estado atual](#estado-atual).
+O console iniciará com simulação em tempo real ativada e dados sincronizados com o seed do banco de dados (schema `vigilis`).
+
