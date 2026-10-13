@@ -1,7 +1,11 @@
 import React, { useState } from 'react';
 import { Zone, EPIType, ZoneCategory } from '../types';
-import { eventsStore } from '../store/eventsStore';
-import { HOSPITAL } from '../config/app';
+import { api } from '../api/endpoints';
+import { useAlerts } from '../hooks/useRealtimeAlerts';
+import { useEscape } from '../hooks/useEscape';
+import { useAuth } from '../store/authStore';
+import { HOSPITAL_NAME } from '../config/app';
+import { ErrorMessage, InlineError, Loading } from '../components/StateMessage';
 import { 
   ShieldIcon, 
   PlusIcon, 
@@ -11,7 +15,11 @@ import {
 } from '../components/icons';
 
 export const Zones: React.FC = () => {
-  const [zones, setZones] = useState<Zone[]>(eventsStore.getZones());
+  const { can } = useAuth();
+  const { zones, loading, error, refresh } = useAlerts();
+  const canWrite = can('zones:write');
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [showModal, setShowModal] = useState<boolean>(false);
   const [editingZone, setEditingZone] = useState<Zone | null>(null);
 
@@ -39,6 +47,7 @@ export const Zones: React.FC = () => {
     setTRemocao(5);
     setSelectedEpis(['MASCARA', 'LUVAS', 'AVENTAL']);
     setIsActive(true);
+    setSaveError(null);
     setShowModal(true);
   };
 
@@ -50,6 +59,7 @@ export const Zones: React.FC = () => {
     setTRemocao(zone.t_remocao_seconds);
     setSelectedEpis([...zone.required_epi]);
     setIsActive(zone.is_active);
+    setSaveError(null);
     setShowModal(true);
   };
 
@@ -61,33 +71,40 @@ export const Zones: React.FC = () => {
     }
   };
 
-  const handleSave = (e: React.FormEvent) => {
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!code.trim() || !name.trim()) return;
 
-    if (editingZone) {
-      eventsStore.updateZone(editingZone.zone_id, {
-        code,
-        name,
-        category,
-        t_remocao_seconds: tRemocao,
-        required_epi: selectedEpis,
-        is_active: isActive,
-      });
-    } else {
-      eventsStore.createZone({
-        code,
-        name,
-        category,
-        t_remocao_seconds: tRemocao,
-        required_epi: selectedEpis,
-        is_active: isActive,
-      });
-    }
+    const input = {
+      code: code.trim(),
+      name: name.trim(),
+      category,
+      t_remocao_seconds: tRemocao,
+      required_epi: selectedEpis,
+      is_active: isActive,
+    };
 
-    setZones([...eventsStore.getZones()]);
-    setShowModal(false);
+    setSaving(true);
+    setSaveError(null);
+    try {
+      if (editingZone) {
+        await api.zones.update(editingZone.zone_id, input);
+      } else {
+        await api.zones.create(input);
+      }
+      refresh();
+      setShowModal(false);
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : 'Não foi possível salvar o setor.');
+    } finally {
+      setSaving(false);
+    }
   };
+
+  useEscape(showModal && !saving, () => setShowModal(false));
+
+  if (loading && zones.length === 0) return <Loading label="Carregando zonas…" />;
+  if (error && zones.length === 0) return <ErrorMessage message={error} onRetry={refresh} />;
 
   return (
     <div className="space-y-8 animate-fadeIn pb-12">
@@ -96,24 +113,31 @@ export const Zones: React.FC = () => {
         <div>
           <h2 className="text-xl font-bold text-white flex items-center gap-2.5">
             <ShieldIcon className="w-6 h-6 text-cyan-400" />
-            <span>Zonas de Risco — {HOSPITAL.short_name}</span>
+            <span>Zonas de Risco{HOSPITAL_NAME ? ` — ${HOSPITAL_NAME}` : ''}</span>
           </h2>
           <p className="text-sm text-slate-300 mt-1">
-            Setores cadastrados no <strong className="text-white">{HOSPITAL.name}</strong>. Parâmetros de tolerância e EPIs obrigatórios desta unidade.
+            Parâmetros de tolerância e EPIs obrigatórios de cada setor monitorado.
           </p>
         </div>
 
-        <button
-          onClick={handleOpenCreate}
-          className="btn-medical-primary flex items-center gap-2 px-5 py-3 rounded-xl text-xs font-bold uppercase tracking-wider self-start sm:self-auto shadow-md"
-        >
-          <PlusIcon className="w-4 h-4" />
-          <span>Cadastrar Novo Setor</span>
-        </button>
+        {canWrite && (
+          <button
+            onClick={handleOpenCreate}
+            className="btn-medical-primary flex items-center gap-2 px-5 py-3 rounded-xl text-xs font-bold uppercase tracking-wider self-start sm:self-auto shadow-md"
+          >
+            <PlusIcon className="w-4 h-4" />
+            <span>Cadastrar Novo Setor</span>
+          </button>
+        )}
       </div>
 
       {/* Hospital Zones Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {zones.length === 0 && (
+          <div className="medical-card p-8 rounded-2xl text-center text-sm text-slate-300 md:col-span-2">
+            Nenhum setor cadastrado.
+          </div>
+        )}
         {zones.map((zone) => (
           <div
             key={zone.zone_id}
@@ -172,15 +196,16 @@ export const Zones: React.FC = () => {
               </div>
             </div>
 
-            {/* Edit Action */}
-            <div className="pt-3 border-t border-white/10 flex items-center justify-end">
-              <button
-                onClick={() => handleOpenEdit(zone)}
-                className="btn-medical-secondary px-4 py-2 rounded-xl text-xs font-semibold transition-all"
-              >
-                Editar Parâmetros
-              </button>
-            </div>
+            {canWrite && (
+              <div className="pt-3 border-t border-white/10 flex items-center justify-end">
+                <button
+                  onClick={() => handleOpenEdit(zone)}
+                  className="btn-medical-secondary px-4 py-2 rounded-xl text-xs font-semibold transition-all"
+                >
+                  Editar Parâmetros
+                </button>
+              </div>
+            )}
           </div>
         ))}
       </div>
@@ -188,7 +213,7 @@ export const Zones: React.FC = () => {
       {/* Create / Edit Modal */}
       {showModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fadeIn">
-          <div className="w-full max-w-lg bg-[#0a1838] border border-cyan-400/40 rounded-2xl p-6 shadow-2xl space-y-5 text-slate-200">
+          <div role="dialog" aria-modal="true" className="w-full max-w-lg bg-[#0a1838] border border-cyan-400/40 rounded-2xl p-6 shadow-2xl space-y-5 text-slate-200">
             <div className="flex items-center justify-between border-b border-white/10 pb-4">
               <h3 className="font-bold text-white text-base flex items-center gap-2">
                 <ShieldIcon className="w-5 h-5 text-cyan-400" />
@@ -198,11 +223,14 @@ export const Zones: React.FC = () => {
             </div>
 
             <form onSubmit={handleSave} className="space-y-4 text-xs">
+              <InlineError message={saveError} />
               <div>
-                <label className="text-slate-200 font-semibold block mb-1.5">Código da Unidade (Ex: UTI-LESTE, CC-03):</label>
+                <label htmlFor="zone-code" className="text-slate-200 font-semibold block mb-1.5">Código da Unidade (Ex: UTI-LESTE, CC-03):</label>
                 <input
+                  id="zone-code"
                   type="text"
                   required
+                  maxLength={40}
                   value={code}
                   onChange={(e) => setCode(e.target.value.toUpperCase())}
                   placeholder="Ex: UTI-SUL, SALA-CIRURGICA-04"
@@ -211,10 +239,12 @@ export const Zones: React.FC = () => {
               </div>
 
               <div>
-                <label className="text-slate-200 font-semibold block mb-1.5">Nome Completo do Setor:</label>
+                <label htmlFor="zone-name" className="text-slate-200 font-semibold block mb-1.5">Nome Completo do Setor:</label>
                 <input
+                  id="zone-name"
                   type="text"
                   required
+                  maxLength={160}
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder="Ex: Unidade Coronariana — Leitos 01 a 12"
@@ -224,8 +254,9 @@ export const Zones: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="text-slate-200 font-semibold block mb-1.5">Categoria do Setor:</label>
+                  <label htmlFor="zone-category" className="text-slate-200 font-semibold block mb-1.5">Categoria do Setor:</label>
                   <select
+                    id="zone-category"
                     value={category}
                     onChange={(e) => setCategory(e.target.value as ZoneCategory)}
                     className="w-full bg-[#07132e] text-white p-3 rounded-xl border border-white/20 focus:border-cyan-400 focus:outline-none text-sm font-medium"
@@ -239,8 +270,9 @@ export const Zones: React.FC = () => {
                 </div>
 
                 <div>
-                  <label className="text-slate-200 font-semibold block mb-1.5">Tolerância (Segundos):</label>
+                  <label htmlFor="zone-t" className="text-slate-200 font-semibold block mb-1.5">Tolerância (Segundos):</label>
                   <input
+                    id="zone-t"
                     type="number"
                     min="1"
                     max="300"
@@ -302,9 +334,10 @@ export const Zones: React.FC = () => {
                 </button>
                 <button
                   type="submit"
-                  className="btn-medical-primary px-6 py-2.5 rounded-xl font-bold text-sm shadow-md"
+                  disabled={saving}
+                  className="btn-medical-primary px-6 py-2.5 rounded-xl font-bold text-sm shadow-md disabled:opacity-60"
                 >
-                  Salvar Setor
+                  {saving ? 'Salvando…' : 'Salvar Setor'}
                 </button>
               </div>
             </form>

@@ -91,7 +91,7 @@ Estas regras já estão garantidas no banco de dados. O backend deve tratá-las 
 - **Dado biométrico é dado sensível** (LGPD, arts. 5º, II, e 11). O *template* facial — o vetor numérico extraído do rosto para comparação — precisa ser cifrado, mantido pelo menor tempo possível e apagado junto com a evidência. O tratamento depende de base legal ainda não definida; ver o [Relatório de Impacto](../docs/DPIA_RIPD.md).
 - **O reconhecimento facial ainda não tem onde ser auditado.** A [ADR-006](../docs/architecture.md) exige prova durável de cada comparação facial, mas o tipo `audit_action` do banco não tem uma ação para isso: as ações de identificação existentes foram pensadas para o fluxo humano. É preciso adicionar essa ação por migração antes de implementar o `face_match_service`.
 - **O trabalho pesado não pode rodar na requisição.** A 2ª IA e o reconhecimento facial devem ser executados fora do processo que responde ao edge. Se a rota de recebimento esperar pela análise, o alerta em tempo real deixa de caber nos 3 segundos.
-- **O contrato com o edge ainda não foi definido** — rota, formato do pacote e resposta. Ver [`ai_edge/README.md`](../ai_edge/README.md#o-que-ainda-precisa-ser-definido).
+- **O contrato da API está proposto em [`docs/openapi.yaml`](../docs/openapi.yaml)**, incluindo `POST /api/edge/events` (o que o edge envia) e o mapeamento de permissões por papel. Ele ainda precisa ser revisado e aceito pelo Vinicius (edge) e pelo Carlos (painel); o painel já foi escrito em cima dele.
 
 ---
 

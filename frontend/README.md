@@ -24,37 +24,35 @@ Todo perfil que vê imagens exige autenticação em dois fatores. No caso do Enc
 
 ---
 
-## Telas previstas
+## Telas
 
-| Tela | Para que serve |
-|---|---|
-| **Login** | Entrada com usuário, senha e segundo fator. |
-| **Painel de alertas** | Infrações chegando em tempo real — meta de até 3 segundos após a detecção — e indicadores de conformidade por área. |
-| **Zonas de risco** | Cadastro das áreas monitoradas, dos EPIs obrigatórios de cada uma e do tempo de tolerância `T_remocao`. |
-| **Detalhe do evento** | Marca o alerta como tratado, mostra quem foi identificado e se a identificação foi feita pela IA ou por uma pessoa, e permite contestá-la. |
-| **Visualizador de evidência** | Exibe a imagem da infração a quem tem permissão. Cada abertura fica registrada na trilha de auditoria. |
-| **Dossiês** | Lista e download dos PDFs dos incidentes, pendentes ou consolidados. |
+Cada tela só aparece para quem tem a permissão correspondente (o backend devolve a lista em `/auth/me`).
+
+| Tela | Permissão | Para que serve |
+|---|---|---|
+| **Login** | — | Usuário e senha; quem tem MFA digita em seguida o código de 6 dígitos. |
+| **Painel de alertas** | `events:read` | Infrações chegando em tempo real (meta de até 3 s), filtros por setor, status e EPI, e indicadores que o banco consegue calcular. |
+| **Zonas de risco** | `zones:read` / `zones:write` | Áreas monitoradas, EPIs obrigatórios e tempo de tolerância `T_remocao`. Só quem tem `zones:write` cadastra e edita. |
+| **Detalhe do evento** | `events:read` | Reconhecer ou descartar o alerta; ver quem foi identificado e se foi a IA ou uma pessoa; identificar, contestar e revogar. |
+| **Visualizador de evidência** | `evidence:view` | Exibe a imagem da infração. O backend exige MFA e grava cada abertura na trilha de auditoria. |
+| **Dossiês** | `dossiers:read` | Lista e abertura do PDF de cada incidente, pendente ou consolidado. |
+| **Auditoria** | `audit:read` | Trilha de auditoria, somente leitura. |
 
 ---
 
 ## Estado atual
 
-**Interface completa, ainda em modo demonstração.** Todas as telas existem e funcionam com **dados fictícios locais** (`src/store/eventsStore.ts`), incluindo um simulador de alertas. Nenhuma tela chama o backend ainda: o `src/api/client.ts` está pronto, mas as telas leem do store. O backend também não existe ainda (ver [`backend/README.md`](../backend/README.md)).
+**A interface está pronta para o backend e fala só com a API real.** Não há dados, usuários nem simulação de exemplo no código: tudo vem de [`docs/openapi.yaml`](../docs/openapi.yaml), o contrato entre o painel, o backend e o edge. **O backend ainda não existe**, então hoje o painel abre na tela de login e não entra: é preciso implementar a API do contrato (ver [`backend/README.md`](../backend/README.md)).
 
-Em modo demonstração (`VITE_DEMO_MODE=true`, o padrão) **nenhuma senha nem código MFA é verificado**, e a tela avisa isso. Fora dele (`VITE_DEMO_MODE=false`), o login e o `apiClient` chamam o backend e, se ele falhar, mostram o erro: não há dados locais de reserva. O sistema é **um hospital por instalação**: o nome vem de `VITE_HOSPITAL_NAME` e não existe `hospital_id`.
+O que foi verificado: `npm run build` (inclui `tsc`) e o fluxo completo no navegador contra um servidor de teste que implementa o contrato — login em duas etapas, alertas em tempo real, reconhecer, identificar, abrir evidência, dossiê, zonas e perfis com permissões diferentes. Não foi verificado contra o backend real, nem a exibição de um PDF real, nem o contêiner Docker.
 
-Falta para sair do modo demonstração: trocar o `eventsStore` pelas chamadas ao `apiClient`, adicionar o cliente de tempo real (`socket.io-client`) e seguir o contrato do OpenAPI do backend (ainda por escrever).
+Decisões desta interface:
 
-### Destaques Implementados:
-- **Design System Azul Neon:** Estética moderna com glassmorphism, bordas neon pulsantes, scanlines de radar, feedback sonoro e visual em tempo real.
-- **Console de Alertas em Tempo Real (`Dashboard.tsx`):** Exibição de infrações em menos de 3s (RNF-05), filtros dinâmicos por zona, status (`PENDENTE`, `RECONHECIDO`, `DESCARTADO`), EPI violado e tipo (`TIPO_A` ou `TIPO_B`).
-- **Simulador de Detecções de Borda:** Loop integrado que simula chegadas contínuas do modelo YOLOv8 no edge com sintetizador de áudio Web Audio API (sem dependência de arquivos externos).
-- **Gestão de Zonas de Risco (`Zones.tsx`):** Cadastro e edição de áreas hospitalares (UTI, Centro Cirúrgico, Isolamento), EPIs obrigatórios e limiar de tolerância `T_remocao` (1s a 300s).
-- **Detalhe do Evento & Revisão LGPD (`EventDetail.tsx`):** Distinção clara entre decisão automatizada da IA (`ADR-010`) e auditoria manual humana (`RF-17`), com fluxo interativo de contestação do titular (LGPD Art. 20) e revogação.
-- **Visualizador Forense de Evidência (`EvidenceViewer.tsx`):** Guarda de segurança **RNF-19** (bloqueio imediato se o usuário não possuir MFA ativo e papel autorizado), comparação entre feed desfocado e snapshot nítido, integridade SHA-256 e contagem regressiva de retenção (90 dias / máx 180).
-- **Dossiês de Incidente em PDF (`Dossiers.tsx` / `DossierModal.tsx`):** Ciclo `PENDENTE` → `CONSOLIDADO` com validação de identificação e visualização em modal do documento oficial com brasão hospitalar.
-- **Trilha Imutável de Auditoria (`AuditLogs.tsx`):** Visualização append-only dos eventos auditados (`EVIDENCE_VIEW`, `IDENTIFICATION_CREATE`, `EVENT_ACK`, etc.).
-- **Autenticação & Desafio MFA (`Login.tsx`):** Entrada com usuário/senha e segundo fator TOTP de 6 dígitos, com seletor de contas demonstrativas pré-cadastradas no seed.
+- **Um hospital por instalação.** Não existe `hospital_id`; o nome exibido vem de `VITE_HOSPITAL_NAME` (opcional).
+- **Sessão em cookie `httpOnly`.** O JavaScript nunca vê o token; nada é guardado em `localStorage`. Requisições que alteram estado levam `X-CSRF-Token`, mantido só em memória.
+- **O cliente não decide nada de segurança.** Auditoria, usuário que reconhece, consolidação do dossiê e acesso à evidência são do servidor. Esconder um botão só deixa a tela coerente.
+- **Sem indicador inventado.** O painel mostra só o que o banco calcula. Não há "taxa de conformidade", porque o sistema guarda infrações, não passagens conformes.
+- **Imagem e PDF** vêm por requisição autenticada, ficam só na memória do navegador (blob revogado ao sair da tela) e o servidor responde com `Cache-Control: no-store`.
 
 ---
 
@@ -66,24 +64,22 @@ Falta para sair do modo demonstração: trocar o `eventsStore` pelas chamadas ao
 
 ## Como o código está organizado
 
-Tecnologias previstas: React, Vite, TypeScript e Tailwind CSS.
+Tecnologias: React, Vite, TypeScript, Tailwind CSS e Socket.IO (cliente).
 
 | Arquivo | Responsabilidade |
 |---|---|
-| `index.html` | Página base onde o React é montado. |
-| `src/main.tsx`, `src/App.tsx` | Inicialização do React e definição das rotas entre telas. |
-| `src/api/client.ts` | Cliente HTTP (axios) que anexa o token de sessão a cada requisição e trata o desafio do segundo fator. |
-| `src/hooks/useRealtimeAlerts.ts` | Assina o canal de alertas em tempo real (WebSocket ou SSE). |
-| `src/store/authStore.ts` | Estado da sessão e das permissões do usuário logado. |
-| `src/pages/Login.tsx` | Tela de login. |
-| `src/pages/Dashboard.tsx` | Painel de alertas. |
-| `src/pages/Zones.tsx` | Zonas de risco. |
-| `src/pages/EventDetail.tsx` | Detalhe do evento, revisão e contestação. |
-| `src/pages/EvidenceViewer.tsx` | Visualizador de evidência. |
-| `src/pages/Dossiers.tsx` | Dossiês. |
-| `src/components/` | Componentes reutilizáveis: `AlertCard` e `DataTable`. |
-| `src/styles/index.css` | Tailwind e estilos base. |
-| `public/favicon.svg` | Ícone da aplicação. |
+| `index.html`, `src/main.tsx`, `src/App.tsx` | Montagem do React, escolha entre login e painel, navegação entre telas. |
+| `src/api/http.ts` | Camada HTTP: cookie de sessão, `X-CSRF-Token`, erros do contrato e tratamento de sessão expirada. |
+| `src/api/endpoints.ts` | Uma função tipada por rota de `docs/openapi.yaml`. |
+| `src/store/authStore.ts` | Sessão e permissões do usuário (`useAuth`). |
+| `src/hooks/useRealtimeAlerts.tsx` | Carga inicial e canal Socket.IO `/alerts`; mantém eventos, zonas e indicadores. |
+| `src/hooks/` (demais) | `useAsync`, `usePagedList` ("carregar mais"), `useNow` e `useEscape`. |
+| `src/pages/` | `Login`, `Dashboard`, `Zones`, `EventDetail`, `EvidenceViewer`, `Dossiers` e `AuditLogs`. |
+| `src/components/` | `Navbar`, `AlertCard`, `DataTable`, `PdfModal`, `StateMessage` (carregando/erro) e `icons`. |
+| `src/types/index.ts` | Tipos que espelham o contrato e o banco. |
+| `src/config/app.ts` | Configuração da instalação (nome do hospital). |
+| `nginx.conf` | No contêiner, serve o painel e faz proxy de `/api` e `/socket.io` para o backend, na mesma origem. |
+| `.env.example` | Variáveis de ambiente do painel. |
 
 ### Estados que as telas precisam representar
 
@@ -112,10 +108,9 @@ Valores definidos no banco de dados, que o painel vai exibir e alterar:
 Com o Node.js instalado, a partir da pasta `frontend/`:
 
 ```bash
-cd frontend
-npm install
-npm run dev      # sobe o servidor de desenvolvimento do Vite em http://localhost:3000
+npm ci
+npm run dev      # Vite em http://localhost:3000, com proxy de /api e /socket.io para http://localhost:5000
+npm run build    # tsc --noEmit e build de produção
 ```
 
-O console inicia em modo demonstração, com simulação de alertas. Variáveis de ambiente em [`.env.example`](.env.example). `npm run build` roda o `tsc` antes do Vite.
-
+O painel espera o backend em `http://localhost:5000`. Sem ele, a tela de login mostra "Não foi possível contatar o servidor". No Docker (`docker compose up frontend`), o Nginx publica o painel na porta 5173 e encaminha `/api` e `/socket.io` ao serviço `backend`.

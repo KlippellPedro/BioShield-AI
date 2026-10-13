@@ -1,5 +1,7 @@
+// Tipos do painel. Espelham docs/openapi.yaml e os tipos do banco (database/schema.sql).
+
 export type EventType = 'TIPO_A' | 'TIPO_B';
-// TIPO_A = Entrada não conforme | TIPO_B = Remoção indevida durante procedimento
+// TIPO_A = entrada sem o EPI | TIPO_B = remoção do EPI durante a permanência
 
 export type EPIType = 'MASCARA' | 'LUVAS' | 'AVENTAL' | 'TOUCA' | 'PROTETOR_FACIAL';
 
@@ -13,7 +15,7 @@ export type IdentificationStatus = 'CONFIRMADA' | 'CONTESTADA' | 'REVOGADA';
 
 export type DossierStatus = 'PENDENTE' | 'CONSOLIDADO';
 
-export type AuditAction = 
+export type AuditAction =
   | 'LOGIN'
   | 'LOGOUT'
   | 'EVENT_VIEW'
@@ -34,22 +36,32 @@ export type AuditAction =
   | 'IDENTIFICATION_CONTEST'
   | 'IDENTIFICATION_REVOKE';
 
+// O backend calcula as permissões a partir dos papéis; a tela só as usa para se montar.
+export type Permission =
+  | 'events:read'
+  | 'events:ack'
+  | 'metrics:read'
+  | 'evidence:view'
+  | 'identification:read'
+  | 'identification:write'
+  | 'identification:review'
+  | 'zones:read'
+  | 'zones:write'
+  | 'dossiers:read'
+  | 'audit:read';
+
 export interface Role {
-  role_id: string;
   code: string;
   name: string;
-  description?: string;
-  can_view_evidence: boolean;
 }
 
 export interface User {
   user_id: string;
   username: string;
-  email: string;
   full_name: string;
-  is_active: boolean;
   mfa_enabled: boolean;
   roles: Role[];
+  permissions: Permission[];
 }
 
 export interface Zone {
@@ -64,25 +76,21 @@ export interface Zone {
   updated_at: string;
 }
 
-export interface VisualEvidence {
+export type ZoneInput = Omit<Zone, 'zone_id' | 'created_at' | 'updated_at'>;
+
+export interface Evidence {
   evidence_id: string;
-  track_id: string;
-  file_reference: string;
-  storage_checksum: string;
-  encryption_key_ref: string;
+  track_id: string | null;
   captured_at: string;
   retention_until: string;
-  blurred_preview?: string;
-  unblurred_snapshot?: string;
+  storage_checksum: string;
 }
 
 export interface Identification {
   identification_id: string;
-  evidence_id: string;
-  source: IdentificationSource; // 'HUMAN' (gestor) ou 'AI' (face match)
-  identified_by: string | null; // NULL se AI (chk_identification_source)
-  identified_by_name?: string | null;
-  subject_reference: string; // Ex: 'Dr. João da Silva / CRM-RS 123456'
+  source: IdentificationSource; // 'HUMAN' (gestor) ou 'AI' (reconhecimento facial)
+  identified_by_name?: string | null; // null quando source = AI
+  subject_reference: string; // nome e matrícula (dado pessoal)
   justification?: string | null;
   status: IdentificationStatus;
   identified_at: string;
@@ -92,53 +100,55 @@ export interface Identification {
 export interface Event {
   event_id: string;
   zone_id: string;
-  zone_code?: string;
-  zone_name?: string;
+  zone_code: string;
+  zone_name: string;
   track_id: string;
   event_type: EventType;
   epi_type: EPIType;
   occurred_at: string;
   detected_at: string;
   status: EventStatus;
-  evidence_id: string | null;
-  evidence?: VisualEvidence | null;
+  evidence_id?: string | null;
+  dossier_id?: string | null;
   audited_professional_name?: string | null;
   audited_professional_registration?: string | null;
-  acknowledged_by?: string | null;
   acknowledged_by_name?: string | null;
   acknowledged_at?: string | null;
   identification?: Identification | null;
 }
 
-export interface IncidentDossier {
+export interface Dossier {
   dossier_id: string;
   event_id: string;
-  pdf_file_reference: string;
   status: DossierStatus;
   created_at: string;
   updated_at: string;
-  event?: Event;
+  event: Event;
 }
 
 export interface AuditLog {
   log_id: number;
   user_id: string | null;
-  user_name?: string;
+  user_name?: string | null;
   action: AuditAction;
   target_event_id: string | null;
   target_evidence_id: string | null;
   ip_address: string;
   user_agent: string | null;
-  details: Record<string, any>;
+  details: Record<string, unknown>;
   occurred_at: string;
 }
 
-export interface ComplianceMetrics {
-  overall_compliance_rate: number;
-  active_alerts_count: number;
-  acknowledged_today_count: number;
-  avg_acknowledgment_time_seconds: number;
-  dossiers_pending_count: number;
-  retention_active_count: number;
-  system_latency_ms: number;
+export interface Metrics {
+  pending_events: number;
+  acknowledged_today: number;
+  avg_ack_seconds?: number | null;
+  avg_detection_latency_seconds?: number | null;
+  dossiers_pending: number;
+  evidences_retained: number;
+}
+
+export interface Page<T> {
+  items: T[];
+  next_cursor: string | null;
 }

@@ -66,7 +66,7 @@ Os mesmos definidos no banco de dados: `MASCARA`, `LUVAS`, `AVENTAL`, `TOUCA` e 
 
 ### O que ainda precisa ser definido
 
-- **O contrato de envio ao backend** — rota, formato do pacote e resposta esperada. O backend tem o arquivo `event_routes.py` reservado para recebê-lo, mas nenhum dos dois lados especificou o formato ainda. É a primeira coisa a combinar entre as duas frentes.
+- **Aceitar o contrato de envio ao backend.** Há uma proposta em [`docs/openapi.yaml`](../docs/openapi.yaml) (`POST /api/edge/events`: `multipart` com os metadados em JSON e o JPEG nítido, chave de API em `X-API-Key` e `Idempotency-Key` para reenvio sem duplicar). Falta o Vinicius revisar e pedir os ajustes que precisar.
 - **O modelo de detecção** e o conjunto de imagens usado para treiná-lo ou validá-lo.
 - **Versões fixas das dependências.** O `requirements.txt` lista as bibliotecas sem versão.
 

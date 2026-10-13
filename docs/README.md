@@ -15,6 +15,7 @@ Não é preciso saber programar para ler estes documentos. Para a visão geral d
 | [Decisões de arquitetura](architecture.md) | Por que o sistema é web e não um programa instalado, por que usa duas IAs, por que as regras de segurança ficam no banco, entre outras escolhas | Desenvolvimento e avaliação técnica |
 | [Relatório de Impacto à Proteção de Dados](DPIA_RIPD.md) | Quais dados pessoais o sistema trata, quais riscos isso traz aos profissionais e aos pacientes, e o que precisa ser resolvido antes de uso real | Saúde, jurídico, gestão e avaliação |
 | [Emenda ao SRS para a v1.4](SRS_v1.4_emenda.md) | O que muda na especificação de requisitos agora que a identificação é automática | Avaliação e gestão do projeto |
+| [Contrato da API (OpenAPI)](openapi.yaml) | Rotas, formatos, permissões por papel e regras de segurança entre o painel, o backend e o edge | Desenvolvimento (backend, frontend e edge) |
 
 ---
 

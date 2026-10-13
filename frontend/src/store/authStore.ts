@@ -1,154 +1,88 @@
-import { User, Role } from '../types';
-import { DEMO_MODE } from '../config/app';
+import { useSyncExternalStore } from 'react';
+import { api, SessionResponse } from '../api/endpoints';
+import { setCsrfToken, setUnauthorizedHandler } from '../api/http';
+import { Permission, User } from '../types';
 
-// Papéis iguais aos de database/schema.sql (tabela roles). role_id é gerado pelo banco,
-// então os ids abaixo só existem no modo demonstração.
-export const DEMO_ROLES: Record<string, Role> = {
-  OPERADOR: {
-    role_id: 'r0000000-0000-0000-0000-000000000001',
-    code: 'OPERADOR',
-    name: 'Operador de Segurança',
-    description: 'Recebe e trata notificações em tempo real.',
-    can_view_evidence: true,
-  },
-  ENFERMAGEM_CHEFE: {
-    role_id: 'r0000000-0000-0000-0000-000000000002',
-    code: 'ENFERMAGEM_CHEFE',
-    name: 'Enfermagem-chefe',
-    description: 'Trata notificações e conduz a auditoria visual da evidência.',
-    can_view_evidence: true,
-  },
-  GESTOR_CCIH: {
-    role_id: 'r0000000-0000-0000-0000-000000000003',
-    code: 'GESTOR_CCIH',
-    name: 'Gestor de Qualidade / CCIH',
-    description: 'Analisa relatórios agregados de conformidade.',
-    can_view_evidence: false,
-  },
-  ADMIN_TI: {
-    role_id: 'r0000000-0000-0000-0000-000000000004',
-    code: 'ADMIN_TI',
-    name: 'Administrador de TI',
-    description: 'Configura câmeras, zonas e parâmetros.',
-    can_view_evidence: false,
-  },
-  DPO: {
-    role_id: 'r0000000-0000-0000-0000-000000000005',
-    code: 'DPO',
-    name: 'Encarregado de Dados',
-    description: 'Audita conformidade LGPD e o ciclo de vida da evidência.',
-    can_view_evidence: true,
-  },
-};
+// Estado da sessão. A verdade fica no backend (cookie httpOnly); aqui só o perfil que a tela exibe.
+// Nada é gravado em localStorage/sessionStorage.
 
-// Contas do modo demonstração. As duas primeiras espelham database/seed.sql.
-// As demais ainda não existem no seed. Respeitam a regra do banco: quem tem papel com
-// can_view_evidence precisa de MFA (RNF-19); por isso o Bruno tem papel sem acesso à evidência.
-export const DEMO_USERS: User[] = [
-  {
-    user_id: 'a0000000-0000-0000-0000-000000000001',
-    username: 'ana.chefe',
-    email: 'ana.chefe@hospital.exemplo',
-    full_name: 'Ana — Enfermagem-chefe',
-    is_active: true,
-    mfa_enabled: true,
-    roles: [DEMO_ROLES.ENFERMAGEM_CHEFE],
-  },
-  {
-    user_id: 'a0000000-0000-0000-0000-000000000002',
-    username: 'bruno.op',
-    email: 'bruno.op@hospital.exemplo',
-    full_name: 'Bruno — Operador (sem MFA)',
-    is_active: true,
-    mfa_enabled: false,
-    roles: [DEMO_ROLES.GESTOR_CCIH],
-  },
-  {
-    user_id: 'a0000000-0000-0000-0000-000000000003',
-    username: 'roberto.seg',
-    email: 'roberto.seg@hospital.exemplo',
-    full_name: 'Roberto — Operador de Segurança',
-    is_active: true,
-    mfa_enabled: true,
-    roles: [DEMO_ROLES.OPERADOR],
-  },
-  {
-    user_id: 'a0000000-0000-0000-0000-000000000004',
-    username: 'mariana.dpo',
-    email: 'mariana.dpo@hospital.exemplo',
-    full_name: 'Mariana — Encarregada de Dados',
-    is_active: true,
-    mfa_enabled: true,
-    roles: [DEMO_ROLES.DPO],
-  },
-];
-
-// A sessão real vive num cookie httpOnly (o JavaScript não enxerga o token). Aqui só
-// guardamos o perfil exibido na tela, e apenas no modo demonstração.
-const USER_STORAGE_KEY = 'bioshield_demo_user';
-
-type AuthListener = (user: User | null) => void;
-const listeners: Set<AuthListener> = new Set();
-
-function getInitialUser(): User | null {
-  if (!DEMO_MODE) return null;
-  try {
-    const saved = sessionStorage.getItem(USER_STORAGE_KEY);
-    if (saved) return JSON.parse(saved);
-  } catch (e) {
-    console.error(e);
-  }
-  return null;
+export interface AuthState {
+  status: 'loading' | 'anonymous' | 'authenticated';
+  user: User | null;
+  // Segundo fator pendente: o mfa_token vale poucos minutos e a senha não fica no navegador.
+  mfaToken: string | null;
+  notice: string | null;
 }
 
-let activeUser: User | null = getInitialUser();
+let state: AuthState = { status: 'loading', user: null, mfaToken: null, notice: null };
+const listeners = new Set<() => void>();
 
-function notify() {
-  listeners.forEach((listener) => listener(activeUser));
+function setState(next: Partial<AuthState>) {
+  state = { ...state, ...next };
+  listeners.forEach((l) => l());
 }
+
+function applySession(res: SessionResponse) {
+  setCsrfToken(res.csrf_token);
+  setState({ status: 'authenticated', user: res.user, mfaToken: null, notice: null });
+}
+
+function clearSession(notice: string | null = null) {
+  setCsrfToken(null);
+  setState({ status: 'anonymous', user: null, mfaToken: null, notice });
+}
+
+setUnauthorizedHandler(() => {
+  if (state.status === 'authenticated') clearSession('Sua sessão expirou. Entre novamente.');
+});
 
 export const authStore = {
-  getUser: (): User | null => activeUser,
-  isAuthenticated: (): boolean => activeUser !== null,
+  getState: () => state,
 
-  // Só para a interface ficar coerente. Quem de fato bloqueia o acesso é o backend (RNF-19).
-  canViewEvidence: (): boolean => {
-    if (!activeUser) return false;
-    const hasEvidenceRole = activeUser.roles.some((r) => r.can_view_evidence);
-    return hasEvidenceRole && activeUser.mfa_enabled;
-  },
-
-  hasRole: (roleCode: string): boolean => {
-    if (!activeUser) return false;
-    return activeUser.roles.some((r) => r.code === roleCode);
-  },
-
-  login: (user: User) => {
-    activeUser = user;
-    if (DEMO_MODE) {
-      try {
-        sessionStorage.setItem(USER_STORAGE_KEY, JSON.stringify(user));
-      } catch (e) {
-        console.error(e);
-      }
-    }
-    notify();
-  },
-
-  logout: () => {
-    activeUser = null;
-    try {
-      sessionStorage.removeItem(USER_STORAGE_KEY);
-    } catch (e) {
-      console.error(e);
-    }
-    notify();
-  },
-
-  subscribe: (listener: AuthListener) => {
+  subscribe: (listener: () => void) => {
     listeners.add(listener);
     return () => {
       listeners.delete(listener);
     };
   },
+
+  // Descobre se já existe sessão (cookie) ao abrir a página.
+  bootstrap: async () => {
+    try {
+      applySession(await api.auth.me());
+    } catch {
+      clearSession();
+    }
+  },
+
+  // Devolve 'mfa' quando falta o segundo fator.
+  login: async (username: string, password: string): Promise<'ok' | 'mfa'> => {
+    const res = await api.auth.login(username, password);
+    if ('mfa_required' in res) {
+      setState({ mfaToken: res.mfa_token, notice: null });
+      return 'mfa';
+    }
+    applySession(res);
+    return 'ok';
+  },
+
+  verifyMfa: async (code: string) => {
+    if (!state.mfaToken) throw new Error('Segundo fator não solicitado.');
+    applySession(await api.auth.mfa(state.mfaToken, code));
+  },
+
+  cancelMfa: () => setState({ mfaToken: null }),
+
+  logout: async () => {
+    try {
+      await api.auth.logout();
+    } finally {
+      clearSession();
+    }
+  },
 };
+
+export function useAuth(): AuthState & { can: (p: Permission) => boolean } {
+  const s = useSyncExternalStore(authStore.subscribe, authStore.getState);
+  return { ...s, can: (p) => s.user?.permissions.includes(p) ?? false };
+}

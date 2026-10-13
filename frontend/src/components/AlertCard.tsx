@@ -1,5 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Event } from '../types';
+import { useAuth } from '../store/authStore';
+import { useNow } from '../hooks/useNow';
 import { 
   AlertTriangleIcon, 
   ClockIcon, 
@@ -14,7 +16,7 @@ import {
 interface AlertCardProps {
   event: Event;
   onSelectEvent: (eventId: string) => void;
-  onAcknowledge: (eventId: string) => void;
+  onAcknowledge: (eventId: string) => Promise<void>;
   onViewEvidence: (evidenceId: string, eventId: string) => void;
 }
 
@@ -24,12 +26,29 @@ export const AlertCard: React.FC<AlertCardProps> = ({
   onAcknowledge,
   onViewEvidence,
 }) => {
+  const { can } = useAuth();
+  const now = useNow();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
   const isPending = event.status === 'PENDENTE';
   const isAck = event.status === 'RECONHECIDO';
 
-  // Calculate elapsed time formatted in simple terms
-  const elapsedMinutes = Math.floor((Date.now() - new Date(event.occurred_at).getTime()) / 60000);
-  const timeDisplay = elapsedMinutes <= 0 ? 'Agora mesmo' : `Há ${elapsedMinutes} minutos`;
+  const elapsedMinutes = Math.floor((now - new Date(event.occurred_at).getTime()) / 60000);
+  const timeDisplay =
+    elapsedMinutes <= 0 ? 'Agora mesmo' : elapsedMinutes === 1 ? 'Há 1 minuto' : `Há ${elapsedMinutes} minutos`;
+
+  const handleAck = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await onAcknowledge(event.event_id);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Não foi possível reconhecer o alerta.');
+    } finally {
+      setBusy(false);
+    }
+  };
 
   // Human-friendly EPI labels
   const epiLabels: Record<string, string> = {
@@ -62,10 +81,10 @@ export const AlertCard: React.FC<AlertCardProps> = ({
           }`} />
           <div>
             <h3 className="text-base font-bold text-white tracking-tight">
-              {event.zone_name || 'Área Hospitalar'}
+              {event.zone_name}
             </h3>
             <span className="text-xs text-cyan-300 font-medium">
-              Código da Unidade: {event.zone_code || 'ZONA'}
+              Código da Unidade: {event.zone_code}
             </span>
           </div>
         </div>
@@ -147,17 +166,18 @@ export const AlertCard: React.FC<AlertCardProps> = ({
 
       {/* Action Buttons - Large, Clear & Accessible */}
       <div className="flex flex-wrap items-center gap-3 pt-2 border-t border-white/10">
-        {isPending && (
+        {isPending && can('events:ack') && (
           <button
-            onClick={() => onAcknowledge(event.event_id)}
-            className="btn-medical-primary flex items-center justify-center gap-2 py-2.5 px-5 rounded-xl text-xs font-bold transition-all shadow-md"
+            onClick={handleAck}
+            disabled={busy}
+            className="btn-medical-primary flex items-center justify-center gap-2 py-2.5 px-5 rounded-xl text-xs font-bold transition-all shadow-md disabled:opacity-60"
           >
             <CheckCircleIcon className="w-4 h-4" />
-            <span>Reconhecer e Atender</span>
+            <span>{busy ? 'Registrando…' : 'Reconhecer e Atender'}</span>
           </button>
         )}
 
-        {event.evidence_id && (
+        {event.evidence_id && can('evidence:view') && (
           <button
             onClick={() => onViewEvidence(event.evidence_id!, event.event_id)}
             className="btn-medical-secondary flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-xs font-semibold transition-all"
@@ -176,6 +196,11 @@ export const AlertCard: React.FC<AlertCardProps> = ({
           <ChevronRightIcon className="w-4 h-4 text-cyan-400" />
         </button>
       </div>
+      {error && (
+        <div role="alert" className="mt-3 p-3 rounded-xl bg-red-500/10 border border-red-400/40 text-xs text-red-200">
+          {error}
+        </div>
+      )}
     </div>
   );
 };

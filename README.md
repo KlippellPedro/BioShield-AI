@@ -78,7 +78,7 @@ Um sistema que filma e identifica profissionais levanta perguntas legítimas. Es
 | Integração contínua | **Ativa** | 4 pipelines; o do banco executa testes reais, os demais aguardam o código das aplicações |
 | IA de detecção no edge (`ai_edge`) | Estruturada, a implementar | Arquivos e responsabilidades definidos |
 | API, 2ª IA e identificação (`backend`) | Estruturada, a implementar | Arquivos e responsabilidades definidos |
-| Painel do gestor (`frontend`) | Interface pronta, em modo demonstração | Todas as telas funcionam com dados fictícios; ainda não chamam o backend, e nenhuma credencial é verificada nesse modo |
+| Painel do gestor (`frontend`) | **Implementado, aguarda o backend** | Todas as telas falam com a API real descrita em [`docs/openapi.yaml`](docs/openapi.yaml); sem dados de exemplo. Verificado contra um servidor de teste, não contra o backend |
 
 "Estruturada" significa que cada arquivo já existe e declara, num comentário, o que vai fazer — o contrato está escrito, a lógica ainda não.
 

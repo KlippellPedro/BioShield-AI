@@ -1,0 +1,794 @@
+openapi: 3.0.3
+info:
+  title: BioShield AI — API do backend
+  version: 0.1.0
+  description: |
+    Contrato entre o backend e seus dois clientes: o **painel do gestor** (`frontend/`) e o
+    **edge** (`ai_edge/`). É a proposta inicial; o backend ainda não existe e este arquivo é a
+    fonte da verdade para quem implementa cada lado.
+
+    **Um hospital por instalação.** Não existe `hospital_id` em nenhuma rota.
+
+    ## Autenticação do painel
+    Sessão em cookie `bioshield_session` (`HttpOnly; Secure; SameSite=Strict`). O JavaScript nunca
+    vê o token. Toda requisição que altera estado (`POST`, `PATCH`, `DELETE`) leva o cabeçalho
+    `X-CSRF-Token`, entregue por `POST /auth/login`, `POST /auth/mfa` e `GET /auth/me`.
+    O token fica só em memória no navegador.
+
+    Login em duas etapas: `POST /auth/login` valida usuário e senha. Quem tem MFA ativo recebe
+    `mfa_required` e um `mfa_token` de curta duração (5 min, uso único); `POST /auth/mfa` troca o
+    `mfa_token` + código TOTP pela sessão. Quem tem papel com acesso à evidência **precisa** de MFA
+    (RNF-19): o banco já impede o contrário, e o backend recusa a sessão se o MFA faltar.
+
+    ## Autenticação do edge
+    Cabeçalho `X-API-Key`, uma chave por instalação do edge, guardada com hash no servidor.
+    Só a rota `POST /edge/events` aceita essa chave.
+
+    ## Permissões
+    O backend calcula `permissions` a partir dos papéis e as devolve em `/auth/me`. O front só usa a
+    lista para montar a tela; **quem bloqueia o acesso é sempre o backend**. Proposta de mapeamento
+    (a confirmar):
+
+    | permissão | OPERADOR | ENFERMAGEM_CHEFE | GESTOR_CCIH | ADMIN_TI | DPO |
+    |---|:-:|:-:|:-:|:-:|:-:|
+    | `events:read` | ✓ | ✓ | ✓ | | ✓ |
+    | `events:ack` | ✓ | ✓ | | | |
+    | `metrics:read` | ✓ | ✓ | ✓ | | ✓ |
+    | `evidence:view` (exige MFA) | ✓ | ✓ | | | ✓ |
+    | `identification:read` | ✓ | ✓ | | | ✓ |
+    | `identification:write` | | ✓ | | | |
+    | `identification:review` | | ✓ | | | ✓ |
+    | `zones:read` | ✓ | ✓ | ✓ | ✓ | ✓ |
+    | `zones:write` | | | | ✓ | |
+    | `dossiers:read` | ✓ | ✓ | | | ✓ |
+    | `audit:read` | | | | | ✓ |
+
+    Campos de dado pessoal (`audited_professional_*`, `identification`) vêm `null` para quem não tem
+    `identification:read`.
+
+    ## Auditoria
+    O **servidor** grava a trilha de auditoria (`audit_logs`); o cliente nunca envia nem escolhe
+    ação, IP ou usuário. Servir a imagem de uma evidência grava `EVIDENCE_VIEW`.
+
+    ## Tempo real
+    Socket.IO, namespace `/alerts`, mesmo caminho `/socket.io` e a mesma sessão por cookie. O
+    servidor emite `event.created` e `event.updated` (corpo = `Event`) só a quem tem `events:read`.
+    Meta: até 3 s entre a detecção e o aviso no painel (RNF-05).
+
+servers:
+  - url: /api
+
+tags:
+  - name: auth
+  - name: events
+  - name: evidence
+  - name: zones
+  - name: dossiers
+  - name: audit
+  - name: edge
+
+security:
+  - cookieAuth: []
+
+paths:
+  /auth/login:
+    post:
+      tags: [auth]
+      summary: Etapa 1 do login (usuário e senha)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username: { type: string, maxLength: 60 }
+                password: { type: string, maxLength: 256 }
+      responses:
+        '200':
+          description: Sessão criada, ou segundo fator exigido.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/SessionResponse'
+                  - $ref: '#/components/schemas/MfaRequired'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /auth/mfa:
+    post:
+      tags: [auth]
+      summary: Etapa 2 do login (código TOTP)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mfa_token, code]
+              properties:
+                mfa_token: { type: string }
+                code: { type: string, pattern: '^[0-9]{6}$' }
+      responses:
+        '200':
+          description: Sessão criada.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SessionResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /auth/me:
+    get:
+      tags: [auth]
+      summary: Sessão atual
+      responses:
+        '200':
+          description: Usuário logado.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SessionResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /auth/logout:
+    post:
+      tags: [auth]
+      summary: Encerra a sessão
+      responses:
+        '204': { description: Sessão encerrada. }
+
+  /events:
+    get:
+      tags: [events]
+      summary: Lista de eventos (mais recentes primeiro)
+      description: 'Exige `events:read`.'
+      parameters:
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/EventStatus' } }
+        - { name: zone_id, in: query, schema: { type: string, format: uuid } }
+        - { name: epi_type, in: query, schema: { $ref: '#/components/schemas/EpiType' } }
+        - { name: event_type, in: query, schema: { $ref: '#/components/schemas/EventType' } }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Cursor' }
+      responses:
+        '200':
+          description: Página de eventos.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_cursor]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Event' }
+                  next_cursor: { type: string, nullable: true }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /events/{event_id}:
+    get:
+      tags: [events]
+      summary: Um evento
+      description: 'Exige `events:read`.'
+      parameters: [{ $ref: '#/components/parameters/EventId' }]
+      responses:
+        '200':
+          description: O evento.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Event' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /events/{event_id}/ack:
+    post:
+      tags: [events]
+      summary: Reconhece (trata) o alerta
+      description: 'Exige `events:ack`. O usuário vem da sessão. Grava `EVENT_ACK`.'
+      parameters: [{ $ref: '#/components/parameters/EventId' }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                notes: { type: string, maxLength: 1000 }
+      responses:
+        '200':
+          description: Evento atualizado (`RECONHECIDO`).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Event' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /events/{event_id}/discard:
+    post:
+      tags: [events]
+      summary: Descarta o alerta (falso positivo)
+      description: 'Exige `events:ack`. O motivo vai para `details` da auditoria. Grava `EVENT_ACK`.'
+      parameters: [{ $ref: '#/components/parameters/EventId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 3, maxLength: 1000 }
+      responses:
+        '200':
+          description: Evento atualizado (`DESCARTADO`).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Event' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /events/{event_id}/identification:
+    post:
+      tags: [events]
+      summary: Identificação humana do profissional
+      description: |
+        Exige `identification:write`. Cria a identificação `source = HUMAN`, grava nome e matrícula
+        no evento, consolida o dossiê e regera o PDF. A identificação pertence à evidência, então
+        vale para todos os eventos que a compartilham. Grava `IDENTIFICATION_CREATE`.
+      parameters: [{ $ref: '#/components/parameters/EventId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [professional_name, professional_registration, justification]
+              properties:
+                professional_name: { type: string, minLength: 3, maxLength: 150 }
+                professional_registration: { type: string, minLength: 1, maxLength: 30 }
+                justification: { type: string, minLength: 3, maxLength: 1000 }
+      responses:
+        '200':
+          description: Evento com a identificação.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Event' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /events/{event_id}/identification/contest:
+    post:
+      tags: [events]
+      summary: Registra a contestação do profissional (LGPD art. 20)
+      description: 'Exige `identification:review`. `CONFIRMADA` → `CONTESTADA`. Grava `IDENTIFICATION_CONTEST`.'
+      parameters: [{ $ref: '#/components/parameters/EventId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Justification' }
+      responses:
+        '200':
+          description: Evento atualizado.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Event' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /events/{event_id}/identification/revoke:
+    post:
+      tags: [events]
+      summary: Revoga a identificação
+      description: |
+        Exige `identification:review`. `CONFIRMADA` ou `CONTESTADA` → `REVOGADA`; limpa nome e
+        matrícula do evento. Grava `IDENTIFICATION_REVOKE`.
+      parameters: [{ $ref: '#/components/parameters/EventId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Justification' }
+      responses:
+        '200':
+          description: Evento atualizado.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Event' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /metrics:
+    get:
+      tags: [events]
+      summary: Indicadores do painel
+      description: |
+        Exige `metrics:read`. Só indicadores que o banco consegue calcular. O sistema armazena
+        infrações, não passagens conformes, então **não existe taxa de conformidade**.
+      responses:
+        '200':
+          description: Indicadores.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Metrics' }
+
+  /evidence/{evidence_id}:
+    get:
+      tags: [evidence]
+      summary: Metadados da evidência
+      description: 'Exige `evidence:view` e MFA ativo (RNF-19). Não grava auditoria; ver `/image`.'
+      parameters: [{ $ref: '#/components/parameters/EvidenceId' }]
+      responses:
+        '200':
+          description: Metadados.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Evidence' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /evidence/{evidence_id}/image:
+    get:
+      tags: [evidence]
+      summary: Imagem nítida da infração
+      description: |
+        Exige `evidence:view` e MFA ativo (RNF-19). O servidor decifra e serve a imagem e grava
+        `EVIDENCE_VIEW`. Resposta com `Cache-Control: no-store`. A imagem é dado pessoal: nunca
+        vai em URL pública nem em parâmetro de página.
+      parameters: [{ $ref: '#/components/parameters/EvidenceId' }]
+      responses:
+        '200':
+          description: Imagem.
+          headers:
+            Cache-Control: { schema: { type: string, example: 'no-store' } }
+          content:
+            image/jpeg:
+              schema: { type: string, format: binary }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /zones:
+    get:
+      tags: [zones]
+      summary: Zonas de risco
+      description: 'Exige `zones:read`.'
+      responses:
+        '200':
+          description: Zonas (inclui inativas).
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Zone' }
+    post:
+      tags: [zones]
+      summary: Cria zona
+      description: 'Exige `zones:write`. Grava `ZONE_CREATE`.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ZoneInput' }
+      responses:
+        '201':
+          description: Zona criada.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Zone' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Validation' }
+
+  /zones/{zone_id}:
+    patch:
+      tags: [zones]
+      summary: Altera zona
+      description: 'Exige `zones:write`. Grava `ZONE_UPDATE`. Zonas não são apagadas: desative com `is_active`.'
+      parameters:
+        - { name: zone_id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ZoneInput' }
+      responses:
+        '200':
+          description: Zona atualizada.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Zone' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Validation' }
+
+  /dossiers:
+    get:
+      tags: [dossiers]
+      summary: Dossiês de incidente
+      description: 'Exige `dossiers:read`.'
+      parameters:
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/DossierStatus' } }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Cursor' }
+      responses:
+        '200':
+          description: Página de dossiês.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_cursor]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Dossier' }
+                  next_cursor: { type: string, nullable: true }
+
+  /dossiers/{dossier_id}/pdf:
+    get:
+      tags: [dossiers]
+      summary: PDF do dossiê
+      description: 'Exige `dossiers:read`. O PDF consolidado contém nome e matrícula. `Cache-Control: no-store`.'
+      parameters:
+        - { name: dossier_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: PDF.
+          headers:
+            Cache-Control: { schema: { type: string, example: 'no-store' } }
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /audit-logs:
+    get:
+      tags: [audit]
+      summary: Trilha de auditoria (somente leitura)
+      description: 'Exige `audit:read`. A trilha é imutável (RNF-14); não há rota de escrita.'
+      parameters:
+        - { name: action, in: query, schema: { $ref: '#/components/schemas/AuditAction' } }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Cursor' }
+      responses:
+        '200':
+          description: Página de registros (mais recentes primeiro).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_cursor]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/AuditLog' }
+                  next_cursor: { type: string, nullable: true }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /edge/events:
+    post:
+      tags: [edge]
+      summary: O edge envia uma suspeita de infração
+      description: |
+        Autenticada por `X-API-Key`. Uma imagem nítida por instante; cada EPI faltante vira um
+        evento, todos apontando para a mesma evidência (1:N, RF-16). Responde `202` assim que o
+        pacote é validado e guardado: a 2ª IA e o reconhecimento facial rodam fora da requisição,
+        senão o alerta não cabe nos 3 s (RNF-05). O `Idempotency-Key` evita duplicar eventos
+        quando o edge reenvia após uma queda de rede (RNF-11).
+      security: [{ apiKeyAuth: [] }]
+      parameters:
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [metadata, snapshot]
+              properties:
+                metadata: { $ref: '#/components/schemas/EdgeMetadata' }
+                snapshot:
+                  type: string
+                  format: binary
+                  description: JPEG nítido, até 5 MB.
+            encoding:
+              metadata: { contentType: application/json }
+              snapshot: { contentType: image/jpeg }
+      responses:
+        '202':
+          description: Recebido.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [event_ids]
+                properties:
+                  event_ids:
+                    type: array
+                    items: { type: string, format: uuid }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/Validation' }
+
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: bioshield_session
+    apiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+
+  parameters:
+    EventId:
+      name: event_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    EvidenceId:
+      name: evidence_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+    Cursor:
+      name: cursor
+      in: query
+      description: Valor `next_cursor` da página anterior.
+      schema: { type: string }
+
+  responses:
+    Unauthorized:
+      description: Credenciais ou sessão inválidas.
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    Forbidden:
+      description: Sem permissão, ou MFA ausente onde é exigido (`MFA_REQUIRED`).
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    NotFound:
+      description: Não encontrado.
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    Conflict:
+      description: 'Estado incompatível com a operação (ex.: evento já reconhecido).'
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    Validation:
+      description: Dados inválidos.
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    TooManyRequests:
+      description: Muitas tentativas; vale também para o bloqueio temporário por senha errada.
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+
+  schemas:
+    Error:
+      type: object
+      required: [error, code]
+      properties:
+        error: { type: string, description: Mensagem em português, segura para exibir. }
+        code:
+          type: string
+          example: MFA_REQUIRED
+          description: 'Código estável: `UNAUTHORIZED`, `FORBIDDEN`, `MFA_REQUIRED`, `NOT_FOUND`, `CONFLICT`, `VALIDATION`, `RATE_LIMITED`.'
+
+    EventType: { type: string, enum: [TIPO_A, TIPO_B], description: 'A = entrada sem o EPI; B = remoção do EPI.' }
+    EpiType: { type: string, enum: [MASCARA, LUVAS, AVENTAL, TOUCA, PROTETOR_FACIAL] }
+    EventStatus: { type: string, enum: [PENDENTE, RECONHECIDO, DESCARTADO] }
+    ZoneCategory: { type: string, enum: [UTI, CENTRO_CIRURGICO, ISOLAMENTO, EMERGENCIA, OUTRO] }
+    IdentificationStatus: { type: string, enum: [CONFIRMADA, CONTESTADA, REVOGADA] }
+    IdentificationSource: { type: string, enum: [HUMAN, AI] }
+    DossierStatus: { type: string, enum: [PENDENTE, CONSOLIDADO] }
+    AuditAction:
+      type: string
+      enum:
+        - LOGIN
+        - LOGOUT
+        - EVENT_VIEW
+        - EVENT_ACK
+        - EVIDENCE_VIEW
+        - EVIDENCE_EXPORT
+        - EVIDENCE_PURGE
+        - ZONE_CREATE
+        - ZONE_UPDATE
+        - ZONE_DELETE
+        - USER_CREATE
+        - USER_UPDATE
+        - USER_DEACTIVATE
+        - ROLE_ASSIGN
+        - ROLE_REVOKE
+        - CONFIG_UPDATE
+        - IDENTIFICATION_CREATE
+        - IDENTIFICATION_CONTEST
+        - IDENTIFICATION_REVOKE
+
+    Permission:
+      type: string
+      enum:
+        - events:read
+        - events:ack
+        - metrics:read
+        - evidence:view
+        - identification:read
+        - identification:write
+        - identification:review
+        - zones:read
+        - zones:write
+        - dossiers:read
+        - audit:read
+
+    Role:
+      type: object
+      required: [code, name]
+      properties:
+        code: { type: string, example: ENFERMAGEM_CHEFE }
+        name: { type: string, example: Enfermagem-chefe }
+
+    User:
+      type: object
+      required: [user_id, username, full_name, mfa_enabled, roles, permissions]
+      properties:
+        user_id: { type: string, format: uuid }
+        username: { type: string }
+        full_name: { type: string }
+        mfa_enabled: { type: boolean }
+        roles:
+          type: array
+          items: { $ref: '#/components/schemas/Role' }
+        permissions:
+          type: array
+          items: { $ref: '#/components/schemas/Permission' }
+
+    SessionResponse:
+      type: object
+      required: [user, csrf_token]
+      properties:
+        user: { $ref: '#/components/schemas/User' }
+        csrf_token: { type: string }
+
+    MfaRequired:
+      type: object
+      required: [mfa_required, mfa_token]
+      properties:
+        mfa_required: { type: boolean, enum: [true] }
+        mfa_token: { type: string }
+
+    Justification:
+      type: object
+      required: [justification]
+      properties:
+        justification: { type: string, minLength: 3, maxLength: 1000 }
+
+    Identification:
+      type: object
+      required: [identification_id, source, subject_reference, status, identified_at]
+      properties:
+        identification_id: { type: string, format: uuid }
+        source: { $ref: '#/components/schemas/IdentificationSource' }
+        identified_by_name:
+          type: string
+          nullable: true
+          description: Gestor responsável; `null` quando `source = AI`.
+        subject_reference: { type: string, description: 'Nome e matrícula. Dado pessoal.' }
+        justification: { type: string, nullable: true }
+        status: { $ref: '#/components/schemas/IdentificationStatus' }
+        identified_at: { type: string, format: date-time }
+        contested_at: { type: string, format: date-time, nullable: true }
+
+    Event:
+      type: object
+      required: [event_id, zone_id, zone_code, zone_name, track_id, event_type, epi_type, occurred_at, detected_at, status]
+      properties:
+        event_id: { type: string, format: uuid }
+        zone_id: { type: string, format: uuid }
+        zone_code: { type: string }
+        zone_name: { type: string }
+        track_id: { type: string, description: Identificador anônimo e efêmero. }
+        event_type: { $ref: '#/components/schemas/EventType' }
+        epi_type: { $ref: '#/components/schemas/EpiType' }
+        occurred_at: { type: string, format: date-time, description: Relógio do edge. }
+        detected_at: { type: string, format: date-time, description: Gravação no servidor. }
+        status: { $ref: '#/components/schemas/EventStatus' }
+        evidence_id: { type: string, format: uuid, nullable: true }
+        dossier_id: { type: string, format: uuid, nullable: true, description: 'Dossiê 1:1 do evento, quando já gerado.' }
+        audited_professional_name: { type: string, nullable: true, description: Dado pessoal. }
+        audited_professional_registration: { type: string, nullable: true, description: Dado pessoal. }
+        acknowledged_by_name: { type: string, nullable: true }
+        acknowledged_at: { type: string, format: date-time, nullable: true }
+        identification:
+          nullable: true
+          allOf: [{ $ref: '#/components/schemas/Identification' }]
+
+    Metrics:
+      type: object
+      required: [pending_events, acknowledged_today, dossiers_pending, evidences_retained]
+      properties:
+        pending_events: { type: integer }
+        acknowledged_today: { type: integer }
+        avg_ack_seconds:
+          type: number
+          nullable: true
+          description: Média de `acknowledged_at - detected_at` dos eventos tratados hoje.
+        avg_detection_latency_seconds:
+          type: number
+          nullable: true
+          description: Média de `detected_at - occurred_at` hoje (RNF-05, meta ≤ 3 s).
+        dossiers_pending: { type: integer }
+        evidences_retained: { type: integer }
+
+    Evidence:
+      type: object
+      required: [evidence_id, track_id, captured_at, retention_until, storage_checksum]
+      properties:
+        evidence_id: { type: string, format: uuid }
+        track_id: { type: string, nullable: true }
+        captured_at: { type: string, format: date-time }
+        retention_until: { type: string, format: date-time }
+        storage_checksum: { type: string, description: SHA-256 do arquivo cifrado. }
+
+    Zone:
+      allOf:
+        - $ref: '#/components/schemas/ZoneInput'
+        - type: object
+          required: [zone_id, created_at, updated_at]
+          properties:
+            zone_id: { type: string, format: uuid }
+            created_at: { type: string, format: date-time }
+            updated_at: { type: string, format: date-time }
+
+    ZoneInput:
+      type: object
+      required: [code, name, category, t_remocao_seconds, required_epi, is_active]
+      properties:
+        code: { type: string, maxLength: 40 }
+        name: { type: string, maxLength: 160 }
+        category: { $ref: '#/components/schemas/ZoneCategory' }
+        t_remocao_seconds: { type: integer, minimum: 1, maximum: 300 }
+        required_epi:
+          type: array
+          items: { $ref: '#/components/schemas/EpiType' }
+          uniqueItems: true
+        is_active: { type: boolean }
+
+    Dossier:
+      type: object
+      required: [dossier_id, event_id, status, created_at, updated_at, event]
+      properties:
+        dossier_id: { type: string, format: uuid }
+        event_id: { type: string, format: uuid }
+        status: { $ref: '#/components/schemas/DossierStatus' }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        event: { $ref: '#/components/schemas/Event' }
+
+    AuditLog:
+      type: object
+      required: [log_id, action, ip_address, details, occurred_at]
+      properties:
+        log_id: { type: integer, format: int64 }
+        user_id: { type: string, format: uuid, nullable: true }
+        user_name: { type: string, nullable: true, description: '`null` para ações do sistema.' }
+        action: { $ref: '#/components/schemas/AuditAction' }
+        target_event_id: { type: string, format: uuid, nullable: true }
+        target_evidence_id: { type: string, format: uuid, nullable: true }
+        ip_address: { type: string }
+        user_agent: { type: string, nullable: true }
+        details: { type: object, additionalProperties: true }
+        occurred_at: { type: string, format: date-time }
+
+    EdgeMetadata:
+      type: object
+      required: [zone_id, track_id, occurred_at, violations]
+      properties:
+        zone_id: { type: string, format: uuid }
+        track_id: { type: string, maxLength: 64 }
+        occurred_at: { type: string, format: date-time }
+        violations:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [event_type, epi_type]
+            properties:
+              event_type: { $ref: '#/components/schemas/EventType' }
+              epi_type: { $ref: '#/components/schemas/EpiType' }
