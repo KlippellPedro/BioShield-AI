@@ -39,7 +39,11 @@ Todo perfil que vê imagens exige autenticação em dois fatores. No caso do Enc
 
 ## Estado atual
 
-**Implementado e funcional.** O front-end do BioShield AI está completamente desenvolvido com foco no design **Azul Neon Moderno** (Cyber-Medical Dark UI com paleta `#00f0ff`, contrastes de alta visibilidade para salas de monitoramento hospitalar e conformidade rigorosa com o SRS v1.4 e LGPD Art. 20).
+**Interface completa, ainda em modo demonstração.** Todas as telas existem e funcionam com **dados fictícios locais** (`src/store/eventsStore.ts`), incluindo um simulador de alertas. Nenhuma tela chama o backend ainda: o `src/api/client.ts` está pronto, mas as telas leem do store. O backend também não existe ainda (ver [`backend/README.md`](../backend/README.md)).
+
+Em modo demonstração (`VITE_DEMO_MODE=true`, o padrão) **nenhuma senha nem código MFA é verificado**, e a tela avisa isso. Fora dele (`VITE_DEMO_MODE=false`), o login e o `apiClient` chamam o backend e, se ele falhar, mostram o erro: não há dados locais de reserva. O sistema é **um hospital por instalação**: o nome vem de `VITE_HOSPITAL_NAME` e não existe `hospital_id`.
+
+Falta para sair do modo demonstração: trocar o `eventsStore` pelas chamadas ao `apiClient`, adicionar o cliente de tempo real (`socket.io-client`) e seguir o contrato do OpenAPI do backend (ainda por escrever).
 
 ### Destaques Implementados:
 - **Design System Azul Neon:** Estética moderna com glassmorphism, bordas neon pulsantes, scanlines de radar, feedback sonoro e visual em tempo real.
@@ -113,5 +117,5 @@ npm install
 npm run dev      # sobe o servidor de desenvolvimento do Vite em http://localhost:3000
 ```
 
-O console iniciará com simulação em tempo real ativada e dados sincronizados com o seed do banco de dados (schema `vigilis`).
+O console inicia em modo demonstração, com simulação de alertas. Variáveis de ambiente em [`.env.example`](.env.example). `npm run build` roda o `tsc` antes do Vite.
 

@@ -34,15 +34,6 @@ export type AuditAction =
   | 'IDENTIFICATION_CONTEST'
   | 'IDENTIFICATION_REVOKE';
 
-export interface Hospital {
-  hospital_id: string;
-  code: string;
-  name: string;
-  short_name: string;
-  city: string;
-  state: string;
-}
-
 export interface Role {
   role_id: string;
   code: string;
@@ -53,19 +44,16 @@ export interface Role {
 
 export interface User {
   user_id: string;
-  hospital_id: string;
   username: string;
   email: string;
   full_name: string;
   is_active: boolean;
   mfa_enabled: boolean;
   roles: Role[];
-  token?: string;
 }
 
 export interface Zone {
   zone_id: string;
-  hospital_id: string;
   code: string;
   name: string;
   category: ZoneCategory;
@@ -78,7 +66,6 @@ export interface Zone {
 
 export interface VisualEvidence {
   evidence_id: string;
-  hospital_id: string;
   track_id: string;
   file_reference: string;
   storage_checksum: string;
@@ -104,7 +91,6 @@ export interface Identification {
 
 export interface Event {
   event_id: string;
-  hospital_id: string;
   zone_id: string;
   zone_code?: string;
   zone_name?: string;
@@ -126,7 +112,6 @@ export interface Event {
 
 export interface IncidentDossier {
   dossier_id: string;
-  hospital_id: string;
   event_id: string;
   pdf_file_reference: string;
   status: DossierStatus;
@@ -137,7 +122,6 @@ export interface IncidentDossier {
 
 export interface AuditLog {
   log_id: number;
-  hospital_id: string;
   user_id: string | null;
   user_name?: string;
   action: AuditAction;

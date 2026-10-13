@@ -13,7 +13,7 @@ import {
   RadioIcon 
 } from '../components/icons';
 import { eventsStore } from '../store/eventsStore';
-import { authStore } from '../store/authStore';
+import { HOSPITAL } from '../config/app';
 
 interface DashboardProps {
   onSelectEvent: (eventId: string) => void;
@@ -32,7 +32,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSelectEvent, onViewEvide
   } = useRealtimeAlerts();
 
   const zones = eventsStore.getZones();
-  const currentHospital = authStore.getHospital();
 
   // Filters
   const [selectedStatus, setSelectedStatus] = useState<string>('TODOS');
@@ -71,7 +70,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSelectEvent, onViewEvide
             }`} />
             <div>
               <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                <span>{currentHospital.name} • Monitoramento de EPI</span>
+                <span>{HOSPITAL.name} • Monitoramento de EPI</span>
                 {hasPulse && (
                   <span className="px-2.5 py-0.5 rounded-full text-xs bg-red-600 text-white font-bold animate-bounce shadow">
                     Nova Ocorrência Detectada
@@ -79,7 +78,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSelectEvent, onViewEvide
                 )}
               </h2>
               <p className="text-sm text-slate-300 mt-0.5">
-                Exibindo exclusivamente as zonas e câmeras ativas da unidade <strong className="text-cyan-300">{currentHospital.short_name}</strong>.
+                Zonas e câmeras ativas da unidade <strong className="text-cyan-300">{HOSPITAL.short_name}</strong>.
               </p>
             </div>
           </div>

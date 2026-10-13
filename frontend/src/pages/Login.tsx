@@ -1,24 +1,21 @@
 import React, { useState } from 'react';
-import { authStore, DEMO_USERS, HOSPITALS } from '../store/authStore';
+import { authStore, DEMO_USERS } from '../store/authStore';
+import { apiClient, ApiError } from '../api/client';
+import { DEMO_MODE, HOSPITAL } from '../config/app';
 import { ShieldIcon, LockIcon, UserIcon, KeyIcon } from '../components/icons';
-import { Hospital } from '../types';
 
 interface LoginProps {
   onLoginSuccess: () => void;
 }
 
 export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
-  const [selectedHospital, setSelectedHospital] = useState<Hospital>(HOSPITALS[0]); // Default: HCPA
-  const [username, setUsername] = useState('ana.chefe');
-  const [password, setPassword] = useState('••••••••••••');
-  const [mfaCode, setMfaCode] = useState('849201');
+  const [username, setUsername] = useState(DEMO_MODE ? 'ana.chefe' : '');
+  const [password, setPassword] = useState(DEMO_MODE ? '••••••••••••' : '');
+  const [mfaCode, setMfaCode] = useState(DEMO_MODE ? '849201' : '');
   const [step, setStep] = useState<'CREDENTIALS' | 'MFA'>('CREDENTIALS');
   const [selectedUser, setSelectedUser] = useState(DEMO_USERS[0]);
-
-  const handleSelectHospital = (hosp: Hospital) => {
-    setSelectedHospital(hosp);
-    authStore.setHospital(hosp.hospital_id);
-  };
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
   const handleSelectDemoUser = (user: typeof DEMO_USERS[0]) => {
     setSelectedUser(user);
@@ -29,20 +26,45 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
     }
   };
 
+  // Modo demonstração: nenhuma credencial é verificada. Fora dele, quem decide é o backend.
+  const submitReal = async (withMfa: boolean) => {
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await apiClient.login(username, password, withMfa ? mfaCode : undefined);
+      if ('mfa_required' in result) {
+        setStep('MFA');
+      } else {
+        authStore.login(result.user);
+        onLoginSuccess();
+      }
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Falha ao entrar.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const handleCredentialsSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (selectedUser.mfa_enabled) {
+    if (!DEMO_MODE) {
+      void submitReal(false);
+    } else if (selectedUser.mfa_enabled) {
       setStep('MFA');
     } else {
-      authStore.login(selectedUser, selectedHospital);
+      authStore.login(selectedUser);
       onLoginSuccess();
     }
   };
 
   const handleMfaSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    authStore.login(selectedUser, selectedHospital);
-    onLoginSuccess();
+    if (!DEMO_MODE) {
+      void submitReal(true);
+    } else {
+      authStore.login(selectedUser);
+      onLoginSuccess();
+    }
   };
 
   return (
@@ -63,32 +85,22 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
             </p>
           </div>
 
-          {/* Hospital Tenant Selector Pill */}
-          <div className="bg-[#061026] p-3 rounded-2xl border border-white/10 text-left space-y-1.5">
-            <label className="text-[11px] font-bold uppercase tracking-wider text-cyan-300 block">
-              Hospital Selecionado para Acesso:
-            </label>
-            <div className="flex items-center gap-2">
-              <select
-                value={selectedHospital.hospital_id}
-                onChange={(e) => {
-                  const h = HOSPITALS.find((item) => item.hospital_id === e.target.value);
-                  if (h) handleSelectHospital(h);
-                }}
-                className="w-full bg-[#0a1838] text-white p-2.5 rounded-xl border border-white/20 focus:border-cyan-400 font-semibold text-xs"
-              >
-                {HOSPITALS.map((h) => (
-                  <option key={h.hospital_id} value={h.hospital_id}>
-                    {h.name} ({h.city} - {h.state})
-                  </option>
-                ))}
-              </select>
-            </div>
-            <p className="text-[11px] text-slate-400">
-              Ao entrar, apenas os setores e alertas do <strong className="text-white">{selectedHospital.short_name}</strong> serão carregados.
-            </p>
+          <div className="bg-[#061026] p-3 rounded-2xl border border-white/10 text-left space-y-1">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-cyan-300 block">Unidade:</span>
+            <strong className="text-white text-sm">{HOSPITAL.name}</strong>
           </div>
         </div>
+
+        {DEMO_MODE && (
+          <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-400/40 text-[11px] text-amber-200">
+            <strong>Modo demonstração:</strong> dados fictícios; nenhuma senha ou código é verificado.
+          </div>
+        )}
+        {error && (
+          <div role="alert" className="p-3 rounded-xl bg-red-500/10 border border-red-400/40 text-xs text-red-200">
+            {error}
+          </div>
+        )}
 
         {/* Form */}
         {step === 'CREDENTIALS' ? (
@@ -123,9 +135,10 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
 
             <button
               type="submit"
+              disabled={busy}
               className="w-full py-3.5 rounded-xl btn-medical-primary text-sm font-bold shadow-md transition-all mt-2"
             >
-              {selectedUser.mfa_enabled ? 'Continuar com Segundo Fator (MFA)' : 'Entrar no Hospital'}
+              {DEMO_MODE && selectedUser.mfa_enabled ? 'Continuar com Segundo Fator (MFA)' : 'Entrar'}
             </button>
           </form>
         ) : (
@@ -169,41 +182,43 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
         )}
 
         {/* Quick Demo Accounts Selection */}
-        <div className="pt-4 border-t border-white/10 space-y-2.5">
-          <span className="text-xs font-bold text-white uppercase tracking-wider block">
-            Acessos Demonstrativos Rápidos ({selectedHospital.code}):
-          </span>
+        {DEMO_MODE && (
+          <div className="pt-4 border-t border-white/10 space-y-2.5">
+            <span className="text-xs font-bold text-white uppercase tracking-wider block">
+              Acessos Demonstrativos Rápidos:
+            </span>
 
-          <div className="space-y-2">
-            {DEMO_USERS.map((u) => {
-              const isSelected = selectedUser.user_id === u.user_id;
-              return (
-                <button
-                  key={u.user_id}
-                  type="button"
-                  onClick={() => handleSelectDemoUser(u)}
-                  className={`w-full text-left p-3 rounded-xl text-xs transition-all flex items-center justify-between border ${
-                    isSelected
-                      ? 'bg-blue-600 text-white border-cyan-300 shadow-md font-medium'
-                      : 'bg-[#07132e] border-white/10 text-slate-300 hover:bg-white/5'
-                  }`}
-                >
-                  <div>
-                    <div className="font-bold text-sm leading-tight">{u.full_name.split('—')[0].trim()}</div>
-                    <div className={`text-[11px] ${isSelected ? 'text-cyan-100' : 'text-slate-400'}`}>
-                      {u.roles[0]?.name}
+            <div className="space-y-2">
+              {DEMO_USERS.map((u) => {
+                const isSelected = selectedUser.user_id === u.user_id;
+                return (
+                  <button
+                    key={u.user_id}
+                    type="button"
+                    onClick={() => handleSelectDemoUser(u)}
+                    className={`w-full text-left p-3 rounded-xl text-xs transition-all flex items-center justify-between border ${
+                      isSelected
+                        ? 'bg-blue-600 text-white border-cyan-300 shadow-md font-medium'
+                        : 'bg-[#07132e] border-white/10 text-slate-300 hover:bg-white/5'
+                    }`}
+                  >
+                    <div>
+                      <div className="font-bold text-sm leading-tight">{u.full_name.split('—')[0].trim()}</div>
+                      <div className={`text-[11px] ${isSelected ? 'text-cyan-100' : 'text-slate-400'}`}>
+                        {u.roles[0]?.name}
+                      </div>
                     </div>
-                  </div>
-                  <span className={`px-2.5 py-1 rounded-full text-[11px] font-bold ${
-                    u.mfa_enabled ? 'bg-white text-blue-900 shadow-sm' : 'bg-slate-800 text-slate-300'
-                  }`}>
-                    {u.mfa_enabled ? 'MFA Ativo' : 'Sem MFA'}
-                  </span>
-                </button>
-              );
-            })}
+                    <span className={`px-2.5 py-1 rounded-full text-[11px] font-bold ${
+                      u.mfa_enabled ? 'bg-white text-blue-900 shadow-sm' : 'bg-slate-800 text-slate-300'
+                    }`}>
+                      {u.mfa_enabled ? 'MFA Ativo' : 'Sem MFA'}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
-        </div>
+        )}
       </div>
     </div>
   );

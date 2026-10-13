@@ -78,7 +78,7 @@ Um sistema que filma e identifica profissionais levanta perguntas legítimas. Es
 | Integração contínua | **Ativa** | 4 pipelines; o do banco executa testes reais, os demais aguardam o código das aplicações |
 | IA de detecção no edge (`ai_edge`) | Estruturada, a implementar | Arquivos e responsabilidades definidos |
 | API, 2ª IA e identificação (`backend`) | Estruturada, a implementar | Arquivos e responsabilidades definidos |
-| Painel do gestor (`frontend`) | **Implementado e funcional** | Interface web completa em React + Vite + TS + Tailwind CSS, tema azul neon moderno, RBAC, MFA, revisão LGPD e simulação em tempo real |
+| Painel do gestor (`frontend`) | Interface pronta, em modo demonstração | Todas as telas funcionam com dados fictícios; ainda não chamam o backend, e nenhuma credencial é verificada nesse modo |
 
 "Estruturada" significa que cada arquivo já existe e declara, num comentário, o que vai fazer — o contrato está escrito, a lógica ainda não.
 

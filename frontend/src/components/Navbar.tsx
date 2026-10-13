@@ -8,7 +8,8 @@ import {
   LogOutIcon 
 } from './icons';
 import { authStore } from '../store/authStore';
-import { User, Hospital } from '../types';
+import { User } from '../types';
+import { HOSPITAL } from '../config/app';
 
 interface NavbarProps {
   activeTab: string;
@@ -24,13 +25,11 @@ export const Navbar: React.FC<NavbarProps> = ({
   pendingAlertsCount,
 }) => {
   const [currentUser, setCurrentUser] = useState<User | null>(authStore.getUser());
-  const [currentHospital, setCurrentHospital] = useState<Hospital>(authStore.getHospital());
   const [showUserMenu, setShowUserMenu] = useState(false);
 
   useEffect(() => {
-    return authStore.subscribe((user, hospital) => {
+    return authStore.subscribe((user) => {
       setCurrentUser(user);
-      setCurrentHospital(hospital);
     });
   }, []);
 
@@ -59,11 +58,11 @@ export const Navbar: React.FC<NavbarProps> = ({
               </span>
               {/* Active Hospital Badge */}
               <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-white text-blue-900 shadow-sm border border-white">
-                {currentHospital.code}
+                {HOSPITAL.code}
               </span>
             </div>
             <p className="text-xs text-slate-300 font-medium">
-              {currentHospital.name}
+              {HOSPITAL.name}
             </p>
           </div>
         </div>
@@ -124,7 +123,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               <div className="absolute right-0 mt-2 w-72 rounded-2xl bg-[#091533] border border-cyan-500/30 shadow-2xl p-3 z-50 animate-fadeIn text-slate-200">
                 <div className="px-3 py-2 border-b border-white/10 mb-2">
                   <div className="text-xs font-bold text-white">
-                    {currentHospital.name}
+                    {HOSPITAL.name}
                   </div>
                   <div className="text-[11px] text-cyan-300 font-semibold">
                     {currentUser?.full_name}
@@ -143,7 +142,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   className="w-full flex items-center gap-2 p-2.5 rounded-xl text-xs text-red-400 hover:bg-red-500/10 font-semibold transition-colors"
                 >
                   <LogOutIcon className="w-4 h-4" />
-                  <span>Sair do Hospital ({currentHospital.code})</span>
+                  <span>Sair do Hospital ({HOSPITAL.code})</span>
                 </button>
               </div>
             )}

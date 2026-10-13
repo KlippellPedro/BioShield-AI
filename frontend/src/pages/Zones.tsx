@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Zone, EPIType, ZoneCategory } from '../types';
 import { eventsStore } from '../store/eventsStore';
-import { authStore } from '../store/authStore';
+import { HOSPITAL } from '../config/app';
 import { 
   ShieldIcon, 
   PlusIcon, 
@@ -89,8 +89,6 @@ export const Zones: React.FC = () => {
     setShowModal(false);
   };
 
-  const currentHospital = authStore.getHospital();
-
   return (
     <div className="space-y-8 animate-fadeIn pb-12">
       {/* Page Header */}
@@ -98,10 +96,10 @@ export const Zones: React.FC = () => {
         <div>
           <h2 className="text-xl font-bold text-white flex items-center gap-2.5">
             <ShieldIcon className="w-6 h-6 text-cyan-400" />
-            <span>Zonas de Risco — {currentHospital.short_name}</span>
+            <span>Zonas de Risco — {HOSPITAL.short_name}</span>
           </h2>
           <p className="text-sm text-slate-300 mt-1">
-            Setores cadastrados exclusivamente para o <strong className="text-white">{currentHospital.name}</strong>. Parâmetros de tolerância e EPIs obrigatórios desta unidade.
+            Setores cadastrados no <strong className="text-white">{HOSPITAL.name}</strong>. Parâmetros de tolerância e EPIs obrigatórios desta unidade.
           </p>
         </div>
 

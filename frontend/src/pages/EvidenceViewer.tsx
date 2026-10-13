@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { VisualEvidence } from '../types';
 import { eventsStore } from '../store/eventsStore';
-import { authStore } from '../store/authStore';
+import { authStore, DEMO_USERS } from '../store/authStore';
+import { DEMO_MODE } from '../config/app';
 import { 
   CameraIcon, 
   LockIcon, 
@@ -70,9 +71,11 @@ export const EvidenceViewer: React.FC<EvidenceViewerProps> = ({
 
         <div className="p-4 rounded-xl bg-[#07132e] text-left text-xs text-slate-300 space-y-1.5 border border-white/10">
           <div className="text-cyan-300 font-bold">Usuário atual: <span className="text-white">{currentUser?.full_name}</span></div>
-          <p className="text-[11px] text-slate-400">
-            Para testar a abertura da evidência visual, utilize o perfil de demonstração da Enfermagem-chefe.
-          </p>
+          {DEMO_MODE && (
+            <p className="text-[11px] text-slate-400">
+              Para testar a abertura da evidência visual, utilize o perfil de demonstração da Enfermagem-chefe.
+            </p>
+          )}
         </div>
 
         <div className="flex items-center justify-center gap-4 pt-2">
@@ -82,14 +85,14 @@ export const EvidenceViewer: React.FC<EvidenceViewerProps> = ({
           >
             Voltar ao Painel
           </button>
-          <button
-            onClick={() => {
-              authStore.switchUserById('a0000000-0000-0000-0000-000000000001'); // Switch to Ana Chefe
-            }}
-            className="btn-medical-primary px-5 py-2.5 rounded-xl text-xs font-bold shadow-md"
-          >
-            Acessar como Ana (Enfermagem-chefe)
-          </button>
+          {DEMO_MODE && (
+            <button
+              onClick={() => authStore.login(DEMO_USERS[0])}
+              className="btn-medical-primary px-5 py-2.5 rounded-xl text-xs font-bold shadow-md"
+            >
+              Acessar como Ana (Enfermagem-chefe)
+            </button>
+          )}
         </div>
       </div>
     );

@@ -11,13 +11,11 @@ import {
 } from '../types';
 import { authStore } from './authStore';
 
-// Initial Risk Zones partitioned by Hospital (HCPA, Santa Casa, Moinhos)
+// Zonas de risco iniciais (modo demonstração) — um hospital por instalação
 const ALL_ZONES: Zone[] = [
-  // --- Hospital de Clínicas de Porto Alegre (HCPA) ---
   {
     zone_id: 'b0000000-0000-0000-0000-000000000001',
-    hospital_id: 'hosp-hcpa-poa',
-    code: 'HCPA-UTI-LESTE',
+    code: 'EX-UTI-LESTE',
     name: 'UTI Leste Adulto — Leitos 01 a 12',
     category: 'UTI',
     t_remocao_seconds: 5,
@@ -28,8 +26,7 @@ const ALL_ZONES: Zone[] = [
   },
   {
     zone_id: 'b0000000-0000-0000-0000-000000000002',
-    hospital_id: 'hosp-hcpa-poa',
-    code: 'HCPA-CC-SALA-03',
+    code: 'EX-CC-SALA-03',
     name: 'Centro Cirúrgico Bloco B — Sala 03 (Transplantes)',
     category: 'CENTRO_CIRURGICO',
     t_remocao_seconds: 3,
@@ -40,8 +37,7 @@ const ALL_ZONES: Zone[] = [
   },
   {
     zone_id: 'b0000000-0000-0000-0000-000000000003',
-    hospital_id: 'hosp-hcpa-poa',
-    code: 'HCPA-ISO-RESP',
+    code: 'EX-ISO-RESP',
     name: 'Isolamento Respiratório e Gotículas B',
     category: 'ISOLAMENTO',
     t_remocao_seconds: 4,
@@ -52,8 +48,7 @@ const ALL_ZONES: Zone[] = [
   },
   {
     zone_id: 'b0000000-0000-0000-0000-000000000004',
-    hospital_id: 'hosp-hcpa-poa',
-    code: 'HCPA-EMERG-VERM',
+    code: 'EX-EMERG-VERM',
     name: 'Emergência Geral Adulto — Sala Vermelha',
     category: 'EMERGENCIA',
     t_remocao_seconds: 6,
@@ -62,57 +57,16 @@ const ALL_ZONES: Zone[] = [
     created_at: new Date(Date.now() - 86400000 * 10).toISOString(),
     updated_at: new Date(Date.now() - 86400000 * 1).toISOString(),
   },
-
-  // --- Santa Casa de Porto Alegre ---
-  {
-    zone_id: 'b0000000-0000-0000-0000-000000000010',
-    hospital_id: 'hosp-santacasa-poa',
-    code: 'SC-UTI-CARDIO',
-    name: 'UTI Cardiológica São José',
-    category: 'UTI',
-    t_remocao_seconds: 5,
-    required_epi: ['MASCARA', 'AVENTAL', 'LUVAS'],
-    is_active: true,
-    created_at: new Date(Date.now() - 86400000 * 10).toISOString(),
-    updated_at: new Date(Date.now() - 86400000 * 1).toISOString(),
-  },
-  {
-    zone_id: 'b0000000-0000-0000-0000-000000000011',
-    hospital_id: 'hosp-santacasa-poa',
-    code: 'SC-CIR-DOM-VICENTE',
-    name: 'Bloco Cirúrgico Dom Vicente Scherer',
-    category: 'CENTRO_CIRURGICO',
-    t_remocao_seconds: 4,
-    required_epi: ['MASCARA', 'AVENTAL', 'LUVAS', 'TOUCA'],
-    is_active: true,
-    created_at: new Date(Date.now() - 86400000 * 8).toISOString(),
-    updated_at: new Date(Date.now() - 86400000 * 1).toISOString(),
-  },
-
-  // --- Hospital Moinhos de Vento ---
-  {
-    zone_id: 'b0000000-0000-0000-0000-000000000020',
-    hospital_id: 'hosp-moinhos-poa',
-    code: 'HMV-UTI-BLOCO-B',
-    name: 'UTI Geral Bloco B',
-    category: 'UTI',
-    t_remocao_seconds: 4,
-    required_epi: ['MASCARA', 'AVENTAL', 'LUVAS'],
-    is_active: true,
-    created_at: new Date(Date.now() - 86400000 * 10).toISOString(),
-    updated_at: new Date(Date.now() - 86400000 * 1).toISOString(),
-  },
 ];
 
-// Initial Evidences with hospital isolation
+// Evidências iniciais (modo demonstração)
 const ALL_EVIDENCES: VisualEvidence[] = [
   {
     evidence_id: 'c0000000-0000-0000-0000-000000000001',
-    hospital_id: 'hosp-hcpa-poa',
     track_id: 'track_00427',
-    file_reference: 's3://hcpa-evidencias-cifradas/2026/10/track_00427.enc',
+    file_reference: 's3://evidencias-cifradas/2026/10/track_00427.enc',
     storage_checksum: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
-    encryption_key_ref: 'vault://kms/hcpa/key-001',
+    encryption_key_ref: 'vault://kms/exemplo/key-001',
     captured_at: new Date(Date.now() - 1000 * 60 * 35).toISOString(),
     retention_until: new Date(Date.now() + 86400000 * 90).toISOString(),
     blurred_preview: 'blurred-sim',
@@ -120,11 +74,10 @@ const ALL_EVIDENCES: VisualEvidence[] = [
   },
   {
     evidence_id: 'c0000000-0000-0000-0000-000000000002',
-    hospital_id: 'hosp-hcpa-poa',
     track_id: 'track_00994',
-    file_reference: 's3://hcpa-evidencias-cifradas/2026/10/track_00994.enc',
+    file_reference: 's3://evidencias-cifradas/2026/10/track_00994.enc',
     storage_checksum: '4a6b281b376d215320c904e28031599a099a896d8e87858c2f1f0a1d4791b10a',
-    encryption_key_ref: 'vault://kms/hcpa/key-002',
+    encryption_key_ref: 'vault://kms/exemplo/key-002',
     captured_at: new Date(Date.now() - 1000 * 60 * 8).toISOString(),
     retention_until: new Date(Date.now() + 86400000 * 90).toISOString(),
     blurred_preview: 'blurred-sim',
@@ -132,11 +85,10 @@ const ALL_EVIDENCES: VisualEvidence[] = [
   },
   {
     evidence_id: 'c0000000-0000-0000-0000-000000000003',
-    hospital_id: 'hosp-hcpa-poa',
     track_id: 'track_00351',
-    file_reference: 's3://hcpa-evidencias-cifradas/2026/10/track_00351.enc',
+    file_reference: 's3://evidencias-cifradas/2026/10/track_00351.enc',
     storage_checksum: '9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08',
-    encryption_key_ref: 'vault://kms/hcpa/key-003',
+    encryption_key_ref: 'vault://kms/exemplo/key-003',
     captured_at: new Date(Date.now() - 1000 * 60 * 2).toISOString(),
     retention_until: new Date(Date.now() + 86400000 * 90).toISOString(),
     blurred_preview: 'blurred-sim',
@@ -144,13 +96,12 @@ const ALL_EVIDENCES: VisualEvidence[] = [
   },
 ];
 
-// Initial Events with hospital isolation
+// Eventos iniciais (modo demonstração)
 const ALL_EVENTS: Event[] = [
   {
     event_id: 'd0000000-0000-0000-0000-000000000003',
-    hospital_id: 'hosp-hcpa-poa',
     zone_id: 'b0000000-0000-0000-0000-000000000002',
-    zone_code: 'HCPA-CC-SALA-03',
+    zone_code: 'EX-CC-SALA-03',
     zone_name: 'Centro Cirúrgico Bloco B — Sala 03 (Transplantes)',
     track_id: 'track_00351',
     event_type: 'TIPO_B',
@@ -167,9 +118,8 @@ const ALL_EVENTS: Event[] = [
   },
   {
     event_id: 'd0000000-0000-0000-0000-000000000002',
-    hospital_id: 'hosp-hcpa-poa',
     zone_id: 'b0000000-0000-0000-0000-000000000003',
-    zone_code: 'HCPA-ISO-RESP',
+    zone_code: 'EX-ISO-RESP',
     zone_name: 'Isolamento Respiratório e Gotículas B',
     track_id: 'track_00994',
     event_type: 'TIPO_A',
@@ -187,16 +137,15 @@ const ALL_EVENTS: Event[] = [
       source: 'AI',
       identified_by: null,
       subject_reference: 'Enf. Camila Prado / COREN-RS 87211',
-      justification: 'Face match automático com 98.4% de confiança no cadastro do HCPA.',
+      justification: 'Face match automático com 98.4% de confiança no cadastro do hospital.',
       status: 'CONFIRMADA',
       identified_at: new Date(Date.now() - 1000 * 60 * 7).toISOString(),
     },
   },
   {
     event_id: 'd0000000-0000-0000-0000-000000000001',
-    hospital_id: 'hosp-hcpa-poa',
     zone_id: 'b0000000-0000-0000-0000-000000000001',
-    zone_code: 'HCPA-UTI-LESTE',
+    zone_code: 'EX-UTI-LESTE',
     zone_name: 'UTI Leste Adulto — Leitos 01 a 12',
     track_id: 'track_00427',
     event_type: 'TIPO_B',
@@ -218,20 +167,19 @@ const ALL_EVENTS: Event[] = [
       identified_by: 'a0000000-0000-0000-0000-000000000001',
       identified_by_name: 'Ana Carolina',
       subject_reference: 'Dr. João da Silva / CRM-RS 123456',
-      justification: 'Reconhecido pela enfermagem-chefe do HCPA via auditoria visual.',
+      justification: 'Reconhecido pela enfermagem-chefe via auditoria visual.',
       status: 'CONFIRMADA',
       identified_at: new Date(Date.now() - 1000 * 60 * 30).toISOString(),
     },
   },
 ];
 
-// Initial Dossiers with hospital isolation
+// Dossiês iniciais (modo demonstração)
 const ALL_DOSSIERS: IncidentDossier[] = [
   {
     dossier_id: 'e0000000-0000-0000-0000-000000000001',
-    hospital_id: 'hosp-hcpa-poa',
     event_id: 'd0000000-0000-0000-0000-000000000001',
-    pdf_file_reference: 's3://hcpa-dossies/2026/10/incidente_001_consolidado.pdf',
+    pdf_file_reference: 's3://dossies/2026/10/incidente_001_consolidado.pdf',
     status: 'CONSOLIDADO',
     created_at: new Date(Date.now() - 1000 * 60 * 35).toISOString(),
     updated_at: new Date(Date.now() - 1000 * 60 * 29).toISOString(),
@@ -239,9 +187,8 @@ const ALL_DOSSIERS: IncidentDossier[] = [
   },
   {
     dossier_id: 'e0000000-0000-0000-0000-000000000002',
-    hospital_id: 'hosp-hcpa-poa',
     event_id: 'd0000000-0000-0000-0000-000000000002',
-    pdf_file_reference: 's3://hcpa-dossies/2026/10/incidente_002_pendente.pdf',
+    pdf_file_reference: 's3://dossies/2026/10/incidente_002_pendente.pdf',
     status: 'PENDENTE',
     created_at: new Date(Date.now() - 1000 * 60 * 8).toISOString(),
     updated_at: new Date(Date.now() - 1000 * 60 * 8).toISOString(),
@@ -249,9 +196,8 @@ const ALL_DOSSIERS: IncidentDossier[] = [
   },
   {
     dossier_id: 'e0000000-0000-0000-0000-000000000003',
-    hospital_id: 'hosp-hcpa-poa',
     event_id: 'd0000000-0000-0000-0000-000000000003',
-    pdf_file_reference: 's3://hcpa-dossies/2026/10/incidente_003_pendente.pdf',
+    pdf_file_reference: 's3://dossies/2026/10/incidente_003_pendente.pdf',
     status: 'PENDENTE',
     created_at: new Date(Date.now() - 1000 * 60 * 2).toISOString(),
     updated_at: new Date(Date.now() - 1000 * 60 * 2).toISOString(),
@@ -263,40 +209,37 @@ const ALL_DOSSIERS: IncidentDossier[] = [
 const ALL_AUDIT_LOGS: AuditLog[] = [
   {
     log_id: 1042,
-    hospital_id: 'hosp-hcpa-poa',
     user_id: 'a0000000-0000-0000-0000-000000000001',
-    user_name: 'Ana Carolina (Enfermagem-chefe HCPA)',
+    user_name: 'Ana Carolina (Enfermagem-chefe)',
     action: 'LOGIN',
     target_event_id: null,
     target_evidence_id: null,
     ip_address: '10.150.22.45',
-    user_agent: 'BioShield HCPA Client v1.4',
-    details: { method: 'MFA_TOTP_VERIFIED', hospital: 'HCPA' },
+    user_agent: 'BioShield Client v1.4',
+    details: { method: 'MFA_TOTP_VERIFIED' },
     occurred_at: new Date(Date.now() - 1000 * 60 * 45).toISOString(),
   },
   {
     log_id: 1043,
-    hospital_id: 'hosp-hcpa-poa',
     user_id: 'a0000000-0000-0000-0000-000000000001',
-    user_name: 'Ana Carolina (Enfermagem-chefe HCPA)',
+    user_name: 'Ana Carolina (Enfermagem-chefe)',
     action: 'EVIDENCE_VIEW',
     target_event_id: 'd0000000-0000-0000-0000-000000000001',
     target_evidence_id: 'c0000000-0000-0000-0000-000000000001',
     ip_address: '10.150.22.45',
-    user_agent: 'BioShield HCPA Client v1.4',
-    details: { reason: 'Auditoria visual de remoção de máscara', zone: 'HCPA-UTI-LESTE' },
+    user_agent: 'BioShield Client v1.4',
+    details: { reason: 'Auditoria visual de remoção de máscara', zone: 'EX-UTI-LESTE' },
     occurred_at: new Date(Date.now() - 1000 * 60 * 32).toISOString(),
   },
   {
     log_id: 1044,
-    hospital_id: 'hosp-hcpa-poa',
     user_id: 'a0000000-0000-0000-0000-000000000001',
-    user_name: 'Ana Carolina (Enfermagem-chefe HCPA)',
+    user_name: 'Ana Carolina (Enfermagem-chefe)',
     action: 'IDENTIFICATION_CREATE',
     target_event_id: 'd0000000-0000-0000-0000-000000000001',
     target_evidence_id: 'c0000000-0000-0000-0000-000000000001',
     ip_address: '10.150.22.45',
-    user_agent: 'BioShield HCPA Client v1.4',
+    user_agent: 'BioShield Client v1.4',
     details: { professional: 'Dr. João da Silva', registration: 'CRM-RS 123456' },
     occurred_at: new Date(Date.now() - 1000 * 60 * 30).toISOString(),
   },
@@ -318,41 +261,16 @@ function notify() {
   listeners.forEach((fn) => fn());
 }
 
-// Current active hospital filter
-function getActiveHospitalId(): string {
-  return authStore.getHospital()?.hospital_id || 'hosp-hcpa-poa';
-}
-
 export const eventsStore = {
-  // Returns strictly the zones of the currently logged-in hospital
-  getZones: () => {
-    const hospId = getActiveHospitalId();
-    return zones.filter((z) => z.hospital_id === hospId);
-  },
+  getZones: () => zones,
 
-  // Returns strictly the events of the currently logged-in hospital
-  getEvents: () => {
-    const hospId = getActiveHospitalId();
-    return events.filter((e) => e.hospital_id === hospId);
-  },
+  getEvents: () => events,
 
-  // Returns strictly the evidences of the currently logged-in hospital
-  getEvidences: () => {
-    const hospId = getActiveHospitalId();
-    return evidences.filter((ev) => ev.hospital_id === hospId);
-  },
+  getEvidences: () => evidences,
 
-  // Returns strictly the dossiers of the currently logged-in hospital
-  getDossiers: () => {
-    const hospId = getActiveHospitalId();
-    return dossiers.filter((d) => d.hospital_id === hospId);
-  },
+  getDossiers: () => dossiers,
 
-  // Returns strictly the audit logs of the currently logged-in hospital
-  getAuditLogs: () => {
-    const hospId = getActiveHospitalId();
-    return auditLogs.filter((l) => l.hospital_id === hospId);
-  },
+  getAuditLogs: () => auditLogs,
 
   isSimulationActive: () => isSimulationRunning,
   hasNewAlertPulse: () => newAlertPulse,
@@ -363,13 +281,13 @@ export const eventsStore = {
   },
 
   getMetrics: (): ComplianceMetrics => {
-    const hospEvents = eventsStore.getEvents();
-    const hospEvidences = eventsStore.getEvidences();
-    const hospDossiers = eventsStore.getDossiers();
+    const allEvents = eventsStore.getEvents();
+    const allEvidences = eventsStore.getEvidences();
+    const allDossiers = eventsStore.getDossiers();
 
-    const pendingCount = hospEvents.filter((e) => e.status === 'PENDENTE').length;
-    const ackCount = hospEvents.filter((e) => e.status === 'RECONHECIDO').length;
-    const pendingDossiers = hospDossiers.filter((d) => d.status === 'PENDENTE').length;
+    const pendingCount = allEvents.filter((e) => e.status === 'PENDENTE').length;
+    const ackCount = allEvents.filter((e) => e.status === 'RECONHECIDO').length;
+    const pendingDossiers = allDossiers.filter((d) => d.status === 'PENDENTE').length;
 
     return {
       overall_compliance_rate: 97.4,
@@ -377,7 +295,7 @@ export const eventsStore = {
       acknowledged_today_count: ackCount,
       avg_acknowledgment_time_seconds: 1.8,
       dossiers_pending_count: pendingDossiers,
-      retention_active_count: hospEvidences.length,
+      retention_active_count: allEvidences.length,
       system_latency_ms: 18,
     };
   },
@@ -571,10 +489,8 @@ export const eventsStore = {
   },
 
   createZone: (zoneData: Omit<Zone, 'zone_id' | 'created_at' | 'updated_at'>) => {
-    const hospId = getActiveHospitalId();
     const newZone: Zone = {
       ...zoneData,
-      hospital_id: hospId,
       zone_id: `b0000000-0000-0000-0000-${Date.now().toString().slice(-12)}`,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
@@ -613,17 +529,15 @@ export const eventsStore = {
     details: Record<string, any>
   ) => {
     const user = authStore.getUser();
-    const hospId = getActiveHospitalId();
     const newLog: AuditLog = {
       log_id: auditLogs.length > 0 ? Math.max(...auditLogs.map((l) => l.log_id)) + 1 : 1000,
-      hospital_id: hospId,
       user_id: user ? user.user_id : null,
       user_name: user ? user.full_name : 'Sistema / Edge AI',
       action,
       target_event_id: targetEventId,
       target_evidence_id: targetEvidenceId,
       ip_address: '10.150.22.' + (Math.floor(Math.random() * 50) + 10),
-      user_agent: 'BioShield HCPA Client v1.4',
+      user_agent: 'BioShield Client v1.4',
       details,
       occurred_at: new Date().toISOString(),
     };
@@ -656,11 +570,10 @@ export const eventsStore = {
 };
 
 function generateRandomIncident() {
-  const activeHospZones = eventsStore.getZones();
-  if (activeHospZones.length === 0) return;
+  const zonesAtivas = eventsStore.getZones();
+  if (zonesAtivas.length === 0) return;
 
-  const hospId = getActiveHospitalId();
-  const zone = activeHospZones[Math.floor(Math.random() * activeHospZones.length)];
+  const zone = zonesAtivas[Math.floor(Math.random() * zonesAtivas.length)];
   const possibleEpis: EPIType[] = zone.required_epi.length > 0 
     ? zone.required_epi 
     : ['MASCARA', 'LUVAS', 'AVENTAL'];
@@ -675,11 +588,10 @@ function generateRandomIncident() {
 
   const newEvidence: VisualEvidence = {
     evidence_id: evidenceId,
-    hospital_id: hospId,
     track_id: trackId,
-    file_reference: `s3://hcpa-evidencias-cifradas/2026/10/${trackId}_auto.enc`,
+    file_reference: `s3://evidencias-cifradas/2026/10/${trackId}_auto.enc`,
     storage_checksum: Array.from({ length: 64 }, () => Math.floor(Math.random() * 16).toString(16)).join(''),
-    encryption_key_ref: 'vault://kms/hcpa/key-edge',
+    encryption_key_ref: 'vault://kms/exemplo/key-edge',
     captured_at: new Date().toISOString(),
     retention_until: new Date(Date.now() + 86400000 * 90).toISOString(),
     blurred_preview: 'blurred-sim',
@@ -688,7 +600,6 @@ function generateRandomIncident() {
 
   const newEvent: Event = {
     event_id: eventId,
-    hospital_id: hospId,
     zone_id: zone.zone_id,
     zone_code: zone.code,
     zone_name: zone.name,
@@ -708,9 +619,8 @@ function generateRandomIncident() {
 
   const newDossier: IncidentDossier = {
     dossier_id: dossierId,
-    hospital_id: hospId,
     event_id: eventId,
-    pdf_file_reference: `s3://hcpa-dossies/2026/10/incidente_${eventId.slice(-6)}_pendente.pdf`,
+    pdf_file_reference: `s3://dossies/2026/10/incidente_${eventId.slice(-6)}_pendente.pdf`,
     status: 'PENDENTE',
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
